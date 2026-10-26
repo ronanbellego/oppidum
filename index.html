@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Oppidum gaulois</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Uncial+Antiqua&family=Alegreya+Sans:wght@400;500;700&display=swap">
+</head>
+<body>
+<div id="app">
+  <header class="top"><div class="in">
+    <div class="brand">Oppidum</div>
+    <div class="stats">
+      <div class="st"><span class="k">Statères</span><span class="v" id="sMoney">0</span></div>
+      <div class="st"><span class="k">Population</span><span class="v" id="sPop">0</span></div>
+      <div class="st"><span class="k">Vivres au grenier</span><span class="v" id="sFood">0</span></div>
+      <div class="st"><span class="k">Postes pourvus</span><span class="v" id="sLabor">0</span></div>
+      <div class="st"><span class="k">Faveur de Toutatis</span><span class="v" id="sFavor">50</span></div>
+      <div class="st"><span class="k">Calendrier de Coligny</span><span class="v" id="sDate"></span></div>
+    </div>
+    <div class="speed" role="group" aria-label="Vitesse">
+      <button id="sp0" data-s="0" aria-pressed="false">Pause</button>
+      <button id="sp1" data-s="1" aria-pressed="true">×1</button>
+      <button id="sp2" data-s="2" aria-pressed="false">×2</button>
+      <button id="sp4" data-s="4" aria-pressed="false">×4</button>
+      <button id="infoBtn" class="pill" aria-controls="panel">Chronique</button>
+    </div>
+  </div></header>
+
+  <div class="main">
+    <div id="view">
+      <canvas id="cv" aria-label="Carte de l'oppidum"></canvas>
+      <div id="views">
+        <div class="vb" role="group" aria-label="Vue de la carte">
+          <button data-v="none" aria-pressed="true">Normale</button><button data-v="water" aria-pressed="false">Eau</button><button data-v="market" aria-pressed="false">Marché</button><button data-v="druid" aria-pressed="false">Culte</button><button data-v="bard" aria-pressed="false">Bardes</button><button data-v="tax" aria-pressed="false">Tribut</button>
+        </div>
+        <div id="viewNote" hidden></div>
+      </div>
+      <div id="toast" role="status"></div>
+      <div id="hint"></div>
+    </div>
+    <aside id="panel" data-open="false">
+      <section class="sec" id="selSec"></section>
+      <section class="sec" id="taxSec"><h2>Tribut</h2>
+        <div class="trade" id="taxBtns" role="group" aria-label="Taux du tribut"><button data-t="0">Léger ×0,6</button><button data-t="1">Normal</button><button data-t="2">Lourd ×1,5</button></div>
+        <div id="taxBody" style="display:flex;flex-direction:column;gap:6px"></div></section>
+      <section class="sec" id="laborSec"><h2>Main-d'œuvre</h2><p class="muted">Un habitant sur deux travaille. Les postes se pourvoient dans l'ordre : maison du chef, vivres (marchés et greniers avant les champs), artisanat, défense, puis vie du clan. Un atelier dont le stock ne trouve plus de place libère ses ouvriers.</p><div id="laborBody" style="display:flex;flex-direction:column;gap:6px"></div></section>
+      <section class="sec" id="godSec">
+        <h2>Les dieux</h2>
+        <div id="godList" style="display:flex;flex-direction:column;gap:8px"></div>
+        <button class="act" id="festBtn">Célébrer une fête (200 st.)</button>
+        <button class="pill" id="wrathBtn" aria-pressed="true">Foudre de Taranis : activée</button>
+        <p class="muted" id="favNote"></p>
+      </section>
+      <section class="sec" id="defSec">
+        <h2>Défense</h2>
+        <div id="defBody" style="display:flex;flex-direction:column;gap:6px"></div>
+        <button class="pill" id="raidBtn" aria-pressed="true">Raids de pillards : activés</button>
+      </section>
+      <section class="sec" id="tradeSec">
+        <h2>Commerce maritime</h2>
+        <p class="muted" id="tradeNote">Les navires marchands accostent au port chaque mois.</p>
+        <div class="trade" id="tradeBtns"></div>
+      </section>
+      <section class="sec" id="objSec"><h2>Objectifs</h2><div id="objList"></div></section>
+      <section class="sec"><h2>Chronique</h2><div class="log" id="log"></div></section>
+      <section class="sec"><button class="pill" id="newBtn">Nouvelle partie</button></section>
+    </aside>
+  </div>
+
+  <nav class="tools" aria-label="Construction"><div class="in" id="tools"></div></nav>
+</div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
