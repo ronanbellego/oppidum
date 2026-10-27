@@ -1,6 +1,8 @@
 // @ts-nocheck — reste de la version mono-fichier, découpé module par module dans les étapes suivantes.
 import { N, MONTH, WS, MAXSTEP, BAL } from '../core/constants';
-import { rng, hashS } from '../core/rng';
+import { rng, hashS, nextRandom } from '../core/rng';
+import { serialize, deserialize } from '../core/save';
+import { localStore } from '../core/storage';
 import { idx, X, Y, inb, SQ3, HR, HX, HY, cube, fromCube, hdist, DIRS, nbDir, NBC, nb4, EDGE_DIR, corner, foot, hexRound, within } from '../core/hex';
 import { MONTHS } from '../data/calendar';
 import { RES } from '../data/resources';
@@ -9,7 +11,6 @@ import { B, GODC, TOOLS } from '../data/buildings';
 import { PRIO, SUB, SECT } from '../data/labor';
 import { WALK, TCOL, INK, AC } from '../data/palette';
 
-/* réglages d'équilibrage regroupés */
 
 
 
@@ -64,7 +65,9 @@ function computeDep(){computeLD();DEP=new Uint8Array(N*N);const q=[];for(let i=0
 const VIS={};function resetVis(){for(const k of['market','druid','bard','tax'])VIS[k]=new Int32Array(N*N).fill(-1e9);}resetVis();
 function markVis(w){const k=w.k==='priest'?'druid':w.k;if(VIS[k])VIS[k][w.cur]=S.tick;}
 
-const R=Math.random;
+/* hasard de la simulation : tiré de l'état de la partie, donc reproductible et sauvegardé avec elle */
+const R=()=>{const[v,n]=nextRandom(S.rs|0);S.rs=n;return v;};
+const store=localStore('oppidum-save',['oppidum-v2']);
 
 /* ---------- carte ---------- */
 function newGame(seed){
@@ -104,7 +107,7 @@ function newGame(seed){
     if(port>=0&&hdist(i,port)<=6)h=Math.min(h,1+hdist(i,port)*.35);
     hgt[i]=Math.max(0,Math.min(7,Math.round(h)));}
   for(let it=0;it<8;it++)for(let i=0;i<N*N;i++){if(ter[i]===2)continue;let m=9;for(const j of nb4(i))if(ter[j]!==2)m=Math.min(m,hgt[j]);if(hgt[i]>m+1)hgt[i]=m+1;}
-  S={v:2,seed,ter,vr,lnd,hgt,road:new Uint8Array(N*N),occ:new Int32Array(N*N),b:{},nid:1,w:[],money:1500,tick:0,mi:0,
+  S={seed,rs:(seed|0)^0x5bd1e995,ter,vr,lnd,hgt,road:new Uint8Array(N*N),occ:new Int32Array(N*N),b:{},nid:1,w:[],money:1500,tick:0,mi:0,
      favor:50,logs:[],sell:{bois:false,fer:false,cervoise:false,torques:false,ble:false,porc:false},
      won:false,flags:{},eff:0,labor:0,jobs:0,pop:0,unemp:0,taxM:0,lastTaxM:0,hungry:0,tradeOK:false,lastBal:0,wall:new Uint8Array(N*N),whp:new Float32Array(N*N),u:[],gf:{taranis:35,belenos:35,epona:35},raidNext:30,raid:0};FE=null;FW=null;FX.length=0;
   resetVis();computeDep();
@@ -391,11 +394,15 @@ function cntL(l){return blds().filter(b=>b.type==='hut'&&b.lvl>=l&&b.pop>0).leng
 function checkObj(){if(!S.won&&OBJ.every(o=>o[1]())){S.won=true;log("Le conseil des druides vous proclame vergobret de l'oppidum. Victoire !");}dirtyObj=true;}
 
 /* ---------- sauvegarde ---------- */
-function ser(){const o=Object.assign({},S);o.ter=Array.from(S.ter);o.vr=Array.from(S.vr);o.road=Array.from(S.road);o.occ=Array.from(S.occ);o.wall=Array.from(S.wall);o.lnd=Array.from(S.lnd||[]);o.hgt=Array.from(S.hgt||[]);o.deco=Array.from(S.deco||[]);o.whp=Array.from(S.whp);return JSON.stringify({S:o,cam});}
-function load(str){const d=JSON.parse(str);const o=d.S;if(!o||o.v!==2)return false;
-  o.ter=Uint8Array.from(o.ter);o.vr=Float32Array.from(o.vr);o.road=Uint8Array.from(o.road);o.occ=Int32Array.from(o.occ);o.wall=o.wall?Uint8Array.from(o.wall):new Uint8Array(N*N);o.whp=o.whp?Float32Array.from(o.whp):new Float32Array(N*N);
-  o.u=o.u||[];o.deco=o.deco&&o.deco.length?Uint8Array.from(o.deco):new Uint8Array(N*N);o.lnd=o.lnd?Uint8Array.from(o.lnd):new Uint8Array(N*N);if(o.hgt&&o.hgt.length)o.hgt=Uint8Array.from(o.hgt);else{const keep=S;newGame(o.seed);o.hgt=S.hgt;S=keep;for(const b of Object.values(o.b)){const f=foot(b.s,b.x,b.y)||[];const h0=o.hgt[idx(b.x,b.y)];for(const t of f)o.hgt[t]=h0;}}o.gf=o.gf||{taranis:35,belenos:35,epona:35};S=o;computeDep();for(const b of blds())if(b.hp==null){b.maxhp=b.hp=40*b.s*b.s;}FE=null;FW=null;resetVis();if(d.cam)cam=d.cam;return true;}
-function save(){try{localStorage.setItem('oppidum-v2',ser());}catch(e){}}
+function ser(){return serialize(S,cam);}
+function load(str){const r=deserialize(str);if(!r.ok){console.warn('Sauvegarde ignorée :',r.reason);return false;}
+  const o=r.state;
+  /* relief absent des plus anciennes sauvegardes : on le recalcule depuis la graine, aplani sous les bâtiments */
+  if(r.missing.includes('hgt')){const keep=S;newGame(o.seed);o.hgt=S.hgt;S=keep;for(const b of Object.values(o.b)){const f=foot(b.s,b.x,b.y)||[];const h0=o.hgt[idx(b.x,b.y)];for(const t of f)o.hgt[t]=h0;}}
+  S=o;computeDep();for(const b of blds())if(b.hp==null){b.maxhp=b.hp=40*b.s*b.s;}FE=null;FW=null;resetVis();if(r.cam)cam=r.cam;
+  if(r.migratedFrom)log(`Partie reprise depuis une sauvegarde au format ${r.migratedFrom}, mise à jour automatiquement.`);
+  return true;}
+function save(){store.write(ser());}
 
 /* ---------- rendu : sprites pré-rendus ---------- */
 let g=ctx;
@@ -1296,7 +1303,7 @@ function frame(t){
 function start(data){
   let ok=false;
   if(data&&data.save){try{ok=load(data.save);}catch(e){}}
-  if(!ok){try{const s=localStorage.getItem('oppidum-v2');if(s)ok=load(s);}catch(e){}}
+  if(!ok){const s=store.read();if(s){try{ok=load(s);}catch(e){console.warn(e);}}}
   if(!ok)newGame(20260);
   staff();
   if(innerWidth>820)setPanel(true);

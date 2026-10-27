@@ -1,0 +1,126 @@
+/**
+ * État d'une partie : tout ce qui doit être sauvegardé, et rien d'autre.
+ * Les caches graphiques, les cartes de distances et les animations vivent ailleurs et se recalculent.
+ */
+import { N } from './constants';
+
+/** Les grilles de la carte, une valeur par hexagone (N × N). */
+export interface Grids {
+  /** Terrain : 0 prairie, 1 forêt, 2 mer, 3 rochers. */
+  ter: Uint8Array;
+  /** Variation décorative propre à chaque case, entre 0 et 1. */
+  vr: Float32Array;
+  /** Lande (bruyère et ajonc) sur une case de prairie. */
+  lnd: Uint8Array;
+  /** Altitude, de 0 à 7. */
+  hgt: Uint8Array;
+  /** Chemin ou pont. */
+  road: Uint8Array;
+  /** Identifiant du bâtiment qui occupe la case, 0 si libre. */
+  occ: Int32Array;
+  /** Rempart : 0 aucun, 1 mur, 2 porte. */
+  wall: Uint8Array;
+  /** Solidité du rempart, de 0 à 100. */
+  whp: Float32Array;
+  /** Site ancien : 0 aucun, 1 grand menhir, 2 dolmen, 3 chêne des anciens. */
+  deco: Uint8Array;
+}
+
+export type GridName = keyof Grids;
+
+/** Type de tableau attendu pour chaque grille, utilisé à l'encodage et au contrôle des sauvegardes. */
+export const GRID_TYPES = {
+  ter: Uint8Array,
+  vr: Float32Array,
+  lnd: Uint8Array,
+  hgt: Uint8Array,
+  road: Uint8Array,
+  occ: Int32Array,
+  wall: Uint8Array,
+  whp: Float32Array,
+  deco: Uint8Array,
+} as const satisfies Record<GridName, unknown>;
+
+export const GRID_NAMES = Object.keys(GRID_TYPES) as GridName[];
+
+export interface Building {
+  id: number;
+  type: string;
+  x: number;
+  y: number;
+  /** Taille d'emprise : 1, 2 (trois hexagones) ou 3 (sept hexagones). */
+  s: 1 | 2 | 3;
+  hp: number;
+  maxhp: number;
+  /** Travailleurs affectés. */
+  wk?: number;
+  stock: Record<string, number>;
+  [extra: string]: unknown;
+}
+
+export interface Walker {
+  k: string;
+  cur: number;
+  nxt: number;
+  t: number;
+  home: number;
+  [extra: string]: unknown;
+}
+
+export interface Unit {
+  k: 'enemy' | 'warrior';
+  cur: number;
+  nxt: number;
+  t: number;
+  hp: number;
+  max: number;
+  [extra: string]: unknown;
+}
+
+export interface LogEntry {
+  /** Date de jeu, déjà mise en forme. */
+  m: string;
+  t: string;
+}
+
+export interface GameState extends Grids {
+  seed: number;
+  /** État du générateur de hasard de la simulation. */
+  rs: number;
+  tick: number;
+  /** Nombre de mois écoulés depuis le début de la partie. */
+  mi: number;
+  money: number;
+  nid: number;
+  b: Record<number, Building>;
+  w: Walker[];
+  u: Unit[];
+  logs: LogEntry[];
+  flags: Record<string, number | boolean>;
+  favor: number;
+  gf: { taranis: number; belenos: number; epona: number };
+  sell: Record<string, boolean>;
+  /** Case d'arrivée des familles (départ de la route du port). */
+  entry?: number;
+  /** Case d'eau où accostent les navires. */
+  dock?: number;
+  /** Compteur de modifications du relief, pour invalider les caches. */
+  hver?: number;
+  won: boolean;
+  /** Champs de simulation secondaires (statistiques du mois, réglages du joueur…), typés au fil du découpage. */
+  [extra: string]: unknown;
+}
+
+/** Caméra sauvegardée avec la partie, pour la retrouver au même endroit. */
+export interface Camera {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/** Crée des grilles vides de la bonne taille. */
+export function emptyGrids(): Grids {
+  const g = {} as Grids;
+  for (const name of GRID_NAMES) (g as unknown as Record<string, unknown>)[name] = new GRID_TYPES[name](N * N);
+  return g;
+}
