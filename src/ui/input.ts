@@ -1,7 +1,7 @@
-// @ts-nocheck — à typer (en cours).
-import { X, Y, fromCube, hexRound } from '../core/hex';
+/** Entrées du joueur : souris, doigts, molette et clavier ; caméra et choix de la case visée. */
+import { X, Y, fromCube, hexRound, type Cell } from '../core/hex';
 import { B } from '../data/buildings';
-import { A } from '../app/state';
+import { A, type Drag } from '../app/state';
 import { $, cv } from '../app/dom';
 import { CR, DPi, HW, SR, STEP, TILT, ZH, ZW } from '../render/projection';
 import { buildRoad, buildWall, demolishRect, place, roadLine } from '../app/game';
@@ -11,8 +11,8 @@ import { setPanel, setSpeed, setTool } from './panels';
 let pinch: { d: number; z: number } | null = null;
 let down: { x: number; y: number; cx: number; cy: number; moved: number; btn: number; pan: boolean } | null = null;
 
-/* ---------- entrées ---------- */
-function resize() {
+/** Recale le canevas sur la taille de la zone de jeu. */
+function resize(): void {
   const r = $('view').getBoundingClientRect();
   A.dpr = window.devicePixelRatio || 1;
   A.cw = r.width;
@@ -20,11 +20,15 @@ function resize() {
   cv.width = Math.max(1, (A.cw * A.dpr) | 0);
   cv.height = Math.max(1, (A.ch * A.dpr) | 0);
 }
-function pick(cx, cy) {
+/**
+ * Case sous un point de l'écran. Le relief déplace les cases vers le haut : on essaie chaque altitude
+ * possible et on garde la case la plus proche de nous dont la hauteur correspond.
+ */
+function pick(cx: number, cy: number): Cell {
   const r = cv.getBoundingClientRect();
   const wx = (cx - r.left - A.cw / 2) / A.cam.z + A.cam.x,
     wy = (cy - r.top - A.ch / 2) / A.cam.z + A.cam.y;
-  const at = zz => {
+  const at = (zz: number): Cell => {
     const qx = wx / HW,
       qy = (wy + zz) / (HW * TILT),
       px = qx * CR + qy * SR,
@@ -60,7 +64,8 @@ cv.addEventListener('pointerdown', e => {
   }
   const i = pick(e.clientX, e.clientY);
   down = { x: e.clientX, y: e.clientY, cx: A.cam.x, cy: A.cam.y, moved: 0, btn: e.button, pan: e.button !== 0 || A.tool === 'inspect' };
-  if (!down.pan && i >= 0 && (A.tool === 'road' || A.tool === 'demolish' || A.tool === 'wall')) A.drag = { mode: A.tool, a: i };
+  if (!down.pan && i >= 0 && (A.tool === 'road' || A.tool === 'demolish' || A.tool === 'wall'))
+    A.drag = { mode: A.tool as Drag['mode'], a: i };
 });
 cv.addEventListener('pointermove', e => {
   if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -80,7 +85,8 @@ cv.addEventListener('pointermove', e => {
     A.cam.y = down.cy - dy / A.cam.z;
   }
 });
-function endPtr(e) {
+/** Fin d'un appui : termine un tracé, ou traite un clic (sélection, pose d'un bâtiment). */
+function endPtr(e: PointerEvent): void {
   ptrs.delete(e.pointerId);
   if (pinch) {
     if (ptrs.size < 2) pinch = null;
@@ -137,9 +143,11 @@ cv.addEventListener(
   },
   { passive: false },
 );
-const keys = {};
+/** Touches enfoncées (en minuscules), lues par la boucle pour déplacer la caméra. */
+const keys: Record<string, number> = {};
 addEventListener('keydown', e => {
-  if (e.target.tagName === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
+  if ((e.target as HTMLElement).tagName === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
+
   keys[e.key.toLowerCase()] = 1;
   if (e.key === 'Escape') {
     setTool('inspect');

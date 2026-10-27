@@ -1,7 +1,11 @@
-// @ts-nocheck — à typer (en cours).
+/**
+ * Terrain en facettes low-poly : chaque case est un hexagone aux coins arrondis dont les sommets suivent
+ * le relief voisin (pentes continues, sans terrasses), bordé de falaises vers la mer. Les terres sont
+ * peintes par blocs dans des canevas mis en cache ; la mer est posée case par case.
+ */
 import { N } from '../core/constants';
-import { EDGE_DIR, HR, HX, HY, corner, idx, nb4, nbDir } from '../core/hex';
-import { landDistance, seaDepth } from '../world/terrain';
+import { EDGE_DIR, HR, HX, HY, corner, idx, nb4, nbDir, type Cell } from '../core/hex';
+import { TER, landDistance, seaDepth } from '../world/terrain';
 import { TCOL } from '../data/palette';
 import { A } from '../app/state';
 import type { GameState } from '../core/state';
@@ -13,6 +17,25 @@ import { P, blit, blur, ln, pick3, sh, sprite } from './kit';
 export let DEP = new Uint8Array(N * N);
 export let LD = new Uint8Array(N * N);
 
+/** Coin d'un contour arrondi : x, y en hexagones, altitude, coin de l'hexagone dont il provient. */
+type RimPt = [number, number, number, number];
+/** Polygone à l'écran et sa couleur. */
+type Poly = [Pt[], string];
+/** Aspect d'une case : b plage, g prairie, l lande, f sous-bois, r éboulis. */
+type LandKind = 'b' | 'g' | 'l' | 'f' | 'r';
+
+/** Géométrie d'une case de terre, prête à peindre. */
+interface TileGeo {
+  /** Facettes du dessus, falaises visibles, sous-couche qui comble les joints. */
+  tris: Poly[];
+  cliffs: Poly[];
+  under: Poly;
+  kind: LandKind;
+  /** Altitude du centre et des six coins. */
+  zc: number;
+  zs: number[];
+}
+
 /** Géométrie des cases et blocs de terrain peints, valables pour une partie et une version du relief. */
 let GEO: TileGeo[] = [],
   GEOS: GameState | null = null,
@@ -21,14 +44,16 @@ let CHK: Record<string, Sprite | null> = {},
   CHKS: GameState | null = null,
   CHKV = -1;
 
-function computeDep() {
+/** Recalcule la profondeur de la mer et la distance à la terre (nouvelle île ou partie chargée). */
+function computeDep(): void {
   LD = landDistance(A.S.ter);
   DEP = seaDepth(A.S.ter);
 }
-function facetRound(base, rnd, amp) {
-  const cs = [];
+/** Hexagone arrondi plat découpé en facettes, centré sur l'origine : le fond des cases de mer. */
+function facetRound(base: string, rnd: Rand, amp: number): void {
+  const cs: [number, number][] = [];
   for (let k = 0; k < 6; k++) cs.push(corner(0, 0, k, HR));
-  const top = rbound(cs, [0, 0, 0, 0, 0, 0], null).map(p => [p[0] * INS, p[1] * INS, 0, p[3]]);
+  const top = rbound(cs, [0, 0, 0, 0, 0, 0], null).map((p): RimPt => [p[0] * INS, p[1] * INS, 0, p[3]]);
   const c = [(rnd() - 0.5) * 0.12, (rnd() - 0.5) * 0.1];
   for (let k = 0; k < top.length; k++) {
     const a = top[k],
@@ -38,21 +63,10 @@ function facetRound(base, rnd, amp) {
     P([W(c[0], c[1]), W(a[0], a[1]), W(b[0], b[1])], sh(base, f), sh(base, f), 0.4);
   }
 }
-function facetHex(base, rnd, amp) {
-  const c = [(rnd() - 0.5) * 0.16, (rnd() - 0.5) * 0.14],
-    pts = [];
-  for (let k = 0; k < 6; k++) pts.push(corner(0, 0, k, HR * 1.012));
-  for (let k = 0; k < 6; k++) {
-    const a = pts[k],
-      b = pts[(k + 1) % 6];
-    const mid = ((60 * k - 60) * Math.PI) / 180;
-    const f = 1 + amp * Math.cos(mid + ROT - Math.PI * 1.25) + (rnd() - 0.5) * amp * 0.6;
-    P([W(c[0], c[1]), W(a[0], a[1]), W(b[0], b[1])], sh(base, f));
-  }
-}
-function clump(x, y, r, cols, rnd, h) {
+/** Petite touffe en facettes (herbe, bruyère, galets). */
+function clump(x: number, y: number, r: number, cols: string, rnd: Rand, h: number): void {
   const n = 5 + ((rnd() * 2) | 0),
-    pts = [];
+    pts: Pt[] = [];
   for (let k = 0; k < n; k++) {
     const a = (k / n) * Math.PI * 2 + rnd() * 0.4;
     pts.push([x + Math.cos(a) * r * (0.75 + rnd() * 0.4), y + Math.sin(a) * r * 0.55 * (0.75 + rnd() * 0.4)]);
@@ -62,16 +76,18 @@ function clump(x, y, r, cols, rnd, h) {
     const a = pts[k],
       b = pts[(k + 1) % n];
     const m = Math.atan2((a[1] + b[1]) / 2 - y, (a[0] + b[0]) / 2 - x);
-    P([top, a, b], sh(cols, 1 + 0.14 * Math.cos(m - Math.PI * 1.25)));
+    P([top as Pt, a, b], sh(cols, 1 + 0.14 * Math.cos(m - Math.PI * 1.25)));
   }
 }
+/** Direction de la lumière (normée), et éclairage d'une surface horizontale. */
 const LIGHT = (() => {
     const v = [-0.45, -0.55, 0.9],
       n = Math.hypot(...v);
     return v.map(a => a / n);
   })(),
   FLAT = LIGHT[2];
-function cornerZ(i, k) {
+/** Altitude du coin k d'une case : moyenne avec les deux voisines qui le partagent, abaissée au bord de l'eau. */
+function cornerZ(i: Cell, k: number): number {
   const a = nbDir(i, EDGE_DIR[k]),
     b = nbDir(i, EDGE_DIR[(k + 5) % 6]);
   let s = (A.S.hgt ? A.S.hgt[i] : 0) * STEP,
@@ -79,7 +95,7 @@ function cornerZ(i, k) {
     wet = false;
   for (const j of [a, b]) {
     if (j < 0) continue;
-    if (A.S.ter[j] === 2 && !A.S.road[j]) {
+    if (A.S.ter[j] === TER.sea && !A.S.road[j]) {
       wet = true;
       continue;
     }
@@ -89,13 +105,15 @@ function cornerZ(i, k) {
   const z = s / n;
   return wet && z < STEP * 1.6 ? ZW + 3 : z;
 }
-function isBeach(i) {
-  return A.S.ter[i] === 0 && (!A.S.hgt || A.S.hgt[i] <= 1) && nb4(i).some(j => A.S.ter[j] === 2 && !A.S.road[j]);
+function isBeach(i: Cell): boolean {
+  return A.S.ter[i] === TER.prairie && (!A.S.hgt || A.S.hgt[i] <= 1) && nb4(i).some(j => A.S.ter[j] === TER.sea && !A.S.road[j]);
 }
+/** Part de chaque côté rognée pour arrondir un coin, et réduction du dessus qui marque les joints. */
 const RT = 0.26,
   INS = 0.955;
-function rbound(cs, zs, sharp) {
-  const o = [];
+/** Contour d'un hexagone aux coins arrondis (sauf ceux marqués sharp), avec l'altitude interpolée. */
+function rbound(cs: [number, number][], zs: number[], sharp: boolean[] | null): RimPt[] {
+  const o: RimPt[] = [];
   for (let k = 0; k < 6; k++) {
     const c = cs[k],
       p = cs[(k + 5) % 6],
@@ -107,42 +125,43 @@ function rbound(cs, zs, sharp) {
       o.push([c[0], c[1], zc, k]);
       continue;
     }
-    const a = [c[0] + (p[0] - c[0]) * RT, c[1] + (p[1] - c[1]) * RT, zc + (zp - zc) * RT, k],
-      b = [c[0] + (n[0] - c[0]) * RT, c[1] + (n[1] - c[1]) * RT, zc + (zn - zc) * RT, k];
+    const a: RimPt = [c[0] + (p[0] - c[0]) * RT, c[1] + (p[1] - c[1]) * RT, zc + (zp - zc) * RT, k],
+      b: RimPt = [c[0] + (n[0] - c[0]) * RT, c[1] + (n[1] - c[1]) * RT, zc + (zn - zc) * RT, k];
     o.push(a, [0.25 * a[0] + 0.5 * c[0] + 0.25 * b[0], 0.25 * a[1] + 0.5 * c[1] + 0.25 * b[1], 0.25 * a[2] + 0.5 * zc + 0.25 * b[2], k], b);
   }
   return o;
 }
-function triShade(A, Bp, C) {
-  const u = [Bp[0] - A[0], Bp[1] - A[1], Bp[2] - A[2]],
-    w = [C[0] - A[0], C[1] - A[1], C[2] - A[2]];
+/** Éclairage d'un triangle (points en pixels) par rapport à une surface plate : positif s'il est plus clair. */
+function triShade(a: Pt3, b: Pt3, c: Pt3): number {
+  const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]],
+    w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
   let n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
   if (n[2] < 0) n = n.map(a => -a);
   const nn = Math.hypot(...n) || 1;
   return (n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2]) / nn - FLAT;
 }
-const isLand = j => j >= 0 && (A.S.ter[j] !== 2 || A.S.road[j]);
-function geoTile(i) {
+const isLand = (j: Cell): boolean => j >= 0 && (A.S.ter[j] !== TER.sea || !!A.S.road[j]);
+function geoTile(i: Cell): TileGeo {
   const t = A.S.ter[i],
     cx = HX(i),
     cy = HY(i),
     v = A.S.vr[i],
     zc = ZH(i) + (v - 0.5) * 3,
     jc = [cx + (v - 0.5) * 0.08, cy + (((v * 7) % 1) - 0.5) * 0.08];
-  const kind = isBeach(i) ? 'b' : t === 0 ? (A.S.lnd && A.S.lnd[i] ? 'l' : 'g') : t === 1 ? 'f' : 'r';
+  const kind: LandKind = isBeach(i) ? 'b' : t === TER.prairie ? (A.S.lnd && A.S.lnd[i] ? 'l' : 'g') : t === TER.forest ? 'f' : 'r';
   const base = kind === 'b' ? '#c8b996' : TCOL[kind];
-  const cs = [],
-    zs = [];
+  const cs: [number, number][] = [],
+    zs: number[] = [];
   for (let k = 0; k < 6; k++) {
     cs.push(corner(cx, cy, k, HR * 1.004));
     zs.push(cornerZ(i, k));
   }
   // sous-couche : coins vifs à l'intérieur des terres, arrondis sur le rivage
   const sharp = [0, 1, 2, 3, 4, 5].map(k => isLand(nbDir(i, EDGE_DIR[(k + 5) % 6])) && isLand(nbDir(i, EDGE_DIR[k])));
-  const under = [rbound(cs, zs, sharp).map(p => W(p[0], p[1], p[2] - 0.6)), sh(base, 0.58)];
+  const under: Poly = [rbound(cs, zs, sharp).map(p => W(p[0], p[1], p[2] - 0.6)), sh(base, 0.58)];
   // dessus : hexagone arrondi, légèrement rentré pour marquer les joints
-  const top = rbound(cs, zs, null).map(p => [cx + (p[0] - cx) * INS, cy + (p[1] - cy) * INS, p[2], p[3]]);
-  const tris = [],
+  const top = rbound(cs, zs, null).map((p): RimPt => [cx + (p[0] - cx) * INS, cy + (p[1] - cy) * INS, p[2], p[3]]);
+  const tris: Poly[] = [],
     L = top.length;
   for (let s2 = 0; s2 < L; s2++) {
     const p = top[s2],
@@ -155,10 +174,10 @@ function geoTile(i) {
   const bot = [0, 1, 2, 3, 4, 5].map(e => {
     const j = nbDir(i, EDGE_DIR[e]);
     if (j < 0) return -30;
-    if (A.S.ter[j] === 2 && !A.S.road[j] && Math.max(zs[e], zs[(e + 1) % 6]) > ZW + 4) return ZW - 1;
+    if (A.S.ter[j] === TER.sea && !A.S.road[j] && Math.max(zs[e], zs[(e + 1) % 6]) > ZW + 4) return ZW - 1;
     return null;
   });
-  const cliffs = [];
+  const cliffs: Poly[] = [];
   for (let s2 = 0; s2 < L; s2++) {
     const p = top[s2],
       q = top[(s2 + 1) % L];
@@ -189,7 +208,8 @@ function geoTile(i) {
   }
   return { tris, cliffs, under, kind, zc, zs };
 }
-function geo(i) {
+/** Géométrie d'une case de terre, calculée à la demande et gardée jusqu'au prochain changement de relief. */
+function geo(i: Cell): TileGeo {
   if (GEOS !== A.S || GEOV !== (A.S.hver || 0)) {
     GEO = [];
     GEOS = A.S;
@@ -199,7 +219,7 @@ function geo(i) {
 }
 /* les terres sont peintes une fois par blocs de 12×12 hexagones, puis réutilisées tant que rien ne change */
 const CHN = 12;
-function chunk(cx2, cy2) {
+function chunk(cx2: number, cy2: number): Sprite | null {
   if (CHKS !== A.S || CHKV !== (A.S.hver || 0)) {
     CHK = {};
     CHKS = A.S;
@@ -207,11 +227,11 @@ function chunk(cx2, cy2) {
   }
   const key = cx2 + ',' + cy2;
   if (key in CHK) return CHK[key];
-  const ts = [];
+  const ts: Cell[] = [];
   for (let y = cy2 * CHN; y < Math.min(N, (cy2 + 1) * CHN); y++)
     for (let x = cx2 * CHN; x < Math.min(N, (cx2 + 1) * CHN); x++) {
       const i = idx(x, y);
-      if (A.S.ter[i] !== 2 || A.S.road[i]) ts.push(i);
+      if (A.S.ter[i] !== TER.sea || A.S.road[i]) ts.push(i);
     }
   if (!ts.length) return (CHK[key] = null);
   let x0 = 1e9,
@@ -230,29 +250,30 @@ function chunk(cx2, cy2) {
   c.width = Math.ceil((x1 - x0) * SC);
   c.height = Math.ceil((y1 - y0) * SC);
   const prev = A.g;
-  A.g = c.getContext('2d');
+  A.g = c.getContext('2d')!;
   A.g.setTransform(SC, 0, 0, SC, -x0 * SC, -y0 * SC);
   A.g.lineJoin = 'round';
   try {
     ts.sort((a, b) => DPi(a) - DPi(b));
     for (const i of ts) {
       const t = A.S.ter[i];
-      if (t !== 2) {
+      if (t !== TER.sea) {
         const G = geo(i),
           [wx, wy] = W(HX(i), HY(i));
         P(G.under[0], G.under[1]);
         for (const [p, cl] of G.tris) P(p, cl, cl, 0.5);
         for (const [p, cl] of G.cliffs) P(p, cl, cl, 0.5);
-        blit(tileDecor(G.kind, (A.S.vr[i] * (t === 0 ? 6 : 3)) | 0), wx, wy - G.zc);
+        blit(tileDecor(G.kind, (A.S.vr[i] * (t === TER.prairie ? 6 : 3)) | 0), wx, wy - G.zc);
       }
     }
-    for (const i of ts) if (A.S.road[i]) roadBand(i, 0);
+    for (const i of ts) if (A.S.road[i]) roadBand(i);
   } finally {
     A.g = prev;
   }
   return (CHK[key] = { c, x0, y0, w: x1 - x0, h: y1 - y0 });
 }
-function tileDecor(kind, v) {
+/** Menus détails posés sur une case de terre : touffes d'herbe, bruyère et ajonc, feuilles mortes, cailloux. */
+function tileDecor(kind: LandKind, v: number): Sprite {
   return sprite('dc' + kind + v, -34, -24, 34, 18, rnd => {
     const spot = () => {
       const a = rnd() * Math.PI * 2,
@@ -292,49 +313,21 @@ function tileDecor(kind, v) {
     }
   });
 }
-function tileSpr(kind, v) {
+/** Case de mer : w eau profonde, s haut-fond (avec parfois un rocher affleurant). */
+function tileSpr(kind: 'w' | 's', v: number): Sprite {
   return sprite('hR' + kind + v, -36, -26, 36, 26, rnd => {
     const base = sh(TCOL[kind], 0.985 + rnd() * 0.03);
-    if (kind === 'w' || kind === 's') facetRound(base, rnd, 0.035);
-    else facetHex(base, rnd, 0.05);
-    const spot = () => {
+    facetRound(base, rnd, 0.035);
+    if (kind === 's' && v === 0) {
       const a = rnd() * Math.PI * 2,
         d = rnd() * 0.33;
-      const p = W(Math.cos(a) * d, Math.sin(a) * d);
-      return p;
-    };
-    if (kind === 'g') {
-      for (let k = 0; k < 3; k++) {
-        const [x, y] = spot();
-        clump(x, y, 2.4, '#6a8458', rnd, 3);
-      }
-    } else if (kind === 'l') {
-      for (let k = 0; k < 4; k++) {
-        const [x, y] = spot();
-        clump(x, y, 3.6 + rnd() * 1.5, pick3(rnd, ['#8e6c8f', '#7d5f80', '#9a789c']), rnd, 3);
-      }
-      if (v % 2 === 0)
-        for (let k = 0; k < 2; k++) {
-          const [x, y] = spot();
-          clump(x, y, 3, '#d4b23c', rnd, 4);
-        }
-    } else if (kind === 'f') {
-      for (let k = 0; k < 3; k++) {
-        const [x, y] = spot();
-        clump(x, y, 2.6, '#5a4a3a', rnd, 1.5);
-      }
-    } else if (kind === 'r') {
-      for (let k = 0; k < 3; k++) {
-        const [x, y] = spot();
-        clump(x, y, 2.6, '#a3958f', rnd, 2);
-      }
-    } else if (kind === 's' && v === 0) {
-      const [x, y] = spot();
+      const [x, y] = W(Math.cos(a) * d, Math.sin(a) * d);
       clump(x, y, 2.4, '#5e7c84', rnd, 0);
     }
   });
 }
-function softShadow(x, y, rx, ry) {
+/** Ombre portée floue au pied d'un objet. */
+function softShadow(x: number, y: number, rx: number, ry: number): void {
   blur(1);
   A.g.fillStyle = 'rgba(20,28,34,.26)';
   A.g.beginPath();
@@ -342,8 +335,9 @@ function softShadow(x, y, rx, ry) {
   A.g.fill();
   blur(0);
 }
-function hexPrism(cx, cy, r, z0, z1, top, side) {
-  const c = k => corner(cx, cy, k, r);
+/** Prisme hexagonal de z0 à z1 : faces visibles éclairées, puis le dessus. */
+function hexPrism(cx: number, cy: number, r: number, z0: number, z1: number, top: string, side: string): void {
+  const c = (k: number) => corner(cx, cy, k, r);
   for (const k of VISK) {
     const a = c(k),
       b = c((k + 1) % 6),
@@ -357,7 +351,8 @@ function hexPrism(cx, cy, r, z0, z1, top, side) {
   }
   P(hexPts(cx, cy, r, z1), top, 'rgba(30,24,22,.35)', 0.5);
 }
-function wallSpr(kind) {
+/** Case de rempart : w talus palissadé, d talus endommagé, g porte. */
+function wallSpr(kind: 'w' | 'd' | 'g'): Sprite {
   return sprite('hw_' + kind, -40, -50, 40, 30, rnd => {
     if (kind === 'g') {
       for (const sx of [-0.3, 0.3]) {
@@ -394,17 +389,18 @@ function wallSpr(kind) {
     }
   });
 }
-function roadBand(i, time) {
+/** Chemin de terre battue (ou pont de planches) reliant la case à ses voisines desservies. */
+function roadBand(i: Cell): void {
   const cx = HX(i),
     cy = HY(i),
-    bridge = A.S.ter[i] === 2,
-    links = [];
+    bridge = A.S.ter[i] === TER.sea,
+    links: Cell[] = [];
   for (const j of nb4(i)) if (A.S.road[j] || (A.S.occ[j] && !bridge)) links.push(j);
   const wd = 0.17,
     col = bridge ? '#7a6452' : '#a59885',
     edge = bridge ? '#4e3e30' : '#857a6a';
   const zc = ZH(i);
-  const band = (j, w, c) => {
+  const band = (j: Cell, w: number, c: string) => {
     const mx = (cx + HX(j)) / 2,
       my = (cy + HY(j)) / 2,
       dx = mx - cx,
@@ -415,7 +411,7 @@ function roadBand(i, time) {
       zm = (zc + ZH(j)) / 2;
     P([W(cx + px, cy + py, zc), W(mx + px, my + py, zm), W(mx - px, my - py, zm), W(cx - px, cy - py, zc)], c);
   };
-  const hub = (w, c) => P(hexPts(cx, cy, w * 1.15, zc), c);
+  const hub = (w: number, c: string) => P(hexPts(cx, cy, w * 1.15, zc), c);
   for (const j of links) if (A.S.road[j]) band(j, wd + 0.04, edge);
   hub(wd + 0.04, edge);
   for (const j of links) if (A.S.road[j]) band(j, wd, col);

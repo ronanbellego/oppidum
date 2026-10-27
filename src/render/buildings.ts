@@ -1,646 +1,49 @@
-// @ts-nocheck — à typer (en cours).
+/**
+ * Dessins des bâtiments : maisons selon leur niveau, champ selon la saison, temples, monuments selon
+ * l'avancement du chantier, ateliers et bâtiments publics, puis les animations posées par-dessus
+ * (cochons, fumées, forge, feu du barde, remplissage des réserves, navire au quai, barre de vie).
+ */
 import { HR, HX, HY, corner, idx } from '../core/hex';
+import type { Building, House } from '../core/state';
 import { used } from '../sim/stock';
 import { B } from '../data/buildings';
 import { AC, INK } from '../data/palette';
 import { A } from '../app/state';
-import { CR, DP2, SR, TILT, W, ZH, ZW, bc, fshade, vis } from './projection';
-import { P, bbox, blur, ln, pick3, sh, sprite, strokes } from './kit';
+import { DP2, TILT, W, ZH, ZW, bc } from './projection';
+import { P, blur, ln, pick3, sh, sprite } from './kit';
 import { figure, shipFig, smoke } from './units';
-import { monProg } from '../app/game';
-import { softShadow } from './terrain';
+import { progress as monProg } from '../sim/monuments';
 import { boulder3, irregular, mass, oak3, pathPts, pencil, smoothPts } from './decor';
+import {
+  FOOT,
+  amph3,
+  banner,
+  barrel3,
+  box,
+  cone,
+  crate3,
+  cyl,
+  cylDoor,
+  door2,
+  face,
+  fence3,
+  gable2,
+  ground,
+  hatchClip,
+  hip2,
+  logs3,
+  menhir3,
+  onFront,
+  post,
+  ring,
+  roundPts,
+  shield3,
+  win2,
+} from './buildkit';
+import type { Pt, Rand, Sprite } from './types';
 
-const FOOT = {
-  1: [[0, 0]],
-  2: [
-    [-0.5, -0.2887],
-    [0.5, -0.2887],
-    [0, 0.5774],
-  ],
-  3: [
-    [0, 0],
-    [1, 0],
-    [-1, 0],
-    [0.5, 0.866],
-    [-0.5, 0.866],
-    [0.5, -0.866],
-    [-0.5, -0.866],
-  ],
-};
-function roundPts(sp, r) {
-  const n = sp.length,
-    o = [];
-  for (let k = 0; k < n; k++) {
-    const p = sp[(k + n - 1) % n],
-      c = sp[k],
-      q = sp[(k + 1) % n];
-    const l1 = Math.hypot(p[0] - c[0], p[1] - c[1]) || 1,
-      l2 = Math.hypot(q[0] - c[0], q[1] - c[1]) || 1,
-      f1 = Math.min(0.4, r / l1),
-      f2 = Math.min(0.4, r / l2);
-    const a = [c[0] + (p[0] - c[0]) * f1, c[1] + (p[1] - c[1]) * f1],
-      b = [c[0] + (q[0] - c[0]) * f2, c[1] + (q[1] - c[1]) * f2];
-    for (let t = 0; t <= 1.001; t += 0.25) {
-      const u = 1 - t;
-      o.push([u * u * a[0] + 2 * u * t * c[0] + t * t * b[0], u * u * a[1] + 2 * u * t * c[1] + t * t * b[1]]);
-    }
-  }
-  return o;
-}
-function hatchClip(sp, rnd, dens) {
-  const [a, b, c, d] = bbox(sp);
-  const n = Math.max(2, ((c - a) * (d - b) * (dens || 0.035)) | 0);
-  A.g.strokeStyle = INK;
-  A.g.lineCap = 'round';
-  for (let k = 0; k < n; k++) {
-    const x = a + rnd() * (c - a),
-      y = b + rnd() * (d - b),
-      l = 3 + rnd() * 3;
-    A.g.globalAlpha = 0.18 + rnd() * 0.2;
-    A.g.lineWidth = 0.5 + rnd() * 0.4;
-    A.g.beginPath();
-    A.g.moveTo(x, y);
-    A.g.lineTo(x + l * 0.75, y + l * 0.6);
-    A.g.stroke();
-  }
-  A.g.globalAlpha = 1;
-}
-/* une face : remplissage aux coins adoucis, texture, ombre hachurée si la face est sombre, trait de crayon */
-/* facettes : chaque face est découpée en triangles de tons voisins, sans texture, pour un vrai rendu low-poly */
-function facets(sp, col, rnd, amp) {
-  const n = sp.length;
-  let cx = 0,
-    cy = 0;
-  for (const p of sp) {
-    cx += p[0];
-    cy += p[1];
-  }
-  cx /= n;
-  cy /= n;
-  const [a, b, c, d] = bbox(sp);
-  const ct = [cx + (rnd() - 0.5) * (c - a) * 0.3, cy + (rnd() - 0.5) * (d - b) * 0.3];
-  for (let k = 0; k < n; k++) {
-    const p = sp[k],
-      q = sp[(k + 1) % n],
-      L = Math.hypot(q[0] - p[0], q[1] - p[1]);
-    if (L > 16) {
-      const m = [(p[0] + q[0]) / 2 + (rnd() - 0.5) * 3, (p[1] + q[1]) / 2 + (rnd() - 0.5) * 3];
-      for (const [u, v] of [
-        [p, m],
-        [m, q],
-      ]) {
-        const f = 1 + (rnd() - 0.5) * amp;
-        P([ct, u, v], sh(col, f), sh(col, f), 0.6);
-      }
-    } else {
-      const f = 1 + (rnd() - 0.5) * amp;
-      P([ct, p, q], sh(col, f), sh(col, f), 0.6);
-    }
-  }
-}
-function face(sp, col, rnd, tex, sh2, pw) {
-  const rp = roundPts(sp, 1.6);
-  pathPts(rp, true);
-  A.g.fillStyle = col;
-  A.g.fill();
-  A.g.save();
-  pathPts(rp, true);
-  A.g.clip();
-  facets(sp, col, rnd, 0.16);
-  if (tex && !tex.surf) tex(sp, col, rnd);
-  A.g.restore();
-  pencil(rp, true, pw || 0.75, rnd, INK, 0.6);
-  return rp;
-}
-const TX = {
-  stone(sp, c, rnd) {
-    const [a, b, cc, d] = bbox(sp);
-    for (let y = b + 1.5; y < d + 2; y += 3.2)
-      for (let x = a + ((y * 7) % 3); x < cc + 2; x += 4 + rnd() * 2) {
-        A.g.fillStyle = sh(c, 0.86 + rnd() * 0.26);
-        A.g.beginPath();
-        A.g.ellipse(x, y, 2 + rnd() * 0.8, 1.3, 0, 0, 7);
-        A.g.fill();
-        A.g.strokeStyle = 'rgba(42,36,28,.32)';
-        A.g.lineWidth = 0.4;
-        A.g.stroke();
-      }
-  },
-  plank(sp, c, rnd) {
-    const [a, b, cc, d] = bbox(sp);
-    A.g.lineWidth = 0.6;
-    for (let x = a + 1.5; x < cc; x += 3.2) {
-      A.g.strokeStyle = 'rgba(42,36,28,.35)';
-      A.g.beginPath();
-      A.g.moveTo(x + (rnd() - 0.5) * 0.4, b);
-      A.g.lineTo(x + (rnd() - 0.5) * 0.4, d);
-      A.g.stroke();
-    }
-  },
-  chaux(sp, c, rnd) {
-    const [a, b, cc, d] = bbox(sp);
-    for (let k = 0; k < 3; k++) {
-      const x = a + rnd() * (cc - a),
-        y = b + rnd() * (d - b);
-      A.g.strokeStyle = 'rgba(120,100,80,.25)';
-      A.g.lineWidth = 0.5;
-      A.g.beginPath();
-      A.g.moveTo(x, y);
-      A.g.lineTo(x + 2, y + 2.5);
-      A.g.lineTo(x + 1, y + 4);
-      A.g.stroke();
-    }
-  },
-  thatch(dx, dy) {
-    return (sp, c, rnd) => strokes(sp, rnd, 0.45, 5, dx, dy, [sh(c, 0.78), sh(c, 1.15), sh(c, 0.9)], 0.7, 0.18);
-  },
-  slate(dir) {
-    return (sp, c, rnd) => {
-      const [a, b, cc, d] = bbox(sp);
-      A.g.strokeStyle = sh(c, 0.7);
-      A.g.lineWidth = 0.6;
-      const sl = dir[1] / (dir[0] || 1e-3);
-      for (let y = b - 60; y < d + 60; y += 2.6) {
-        A.g.beginPath();
-        A.g.moveTo(a, y);
-        A.g.lineTo(cc, y + (cc - a) * sl);
-        A.g.stroke();
-      }
-      for (let k = 0; k < ((((cc - a) * (d - b)) / 18) | 0); k++) {
-        const x = a + rnd() * (cc - a),
-          y = b + rnd() * (d - b);
-        A.g.beginPath();
-        A.g.moveTo(x, y);
-        A.g.lineTo(x, y + 1.6);
-        A.g.stroke();
-      }
-    };
-  },
-};
-function box(x0, y0, x1, y1, z0, z1, col, rnd, tex, top) {
-  const fs = [
-    [x0, y1, x1, y1, 0, 1],
-    [x1, y0, x1, y1, 1, 0],
-    [x0, y0, x0, y1, -1, 0],
-    [x0, y0, x1, y0, 0, -1],
-  ];
-  for (const [ax, ay, bx, by, nx, ny] of fs) {
-    if (!vis(nx, ny)) continue;
-    const f = fshade(nx, ny);
-    face([W(ax, ay, z0), W(bx, by, z0), W(bx, by, z1), W(ax, ay, z1)], sh(col, f * 1.1), rnd, tex, f < 0.8 ? 0.03 : 0);
-  }
-  if (top) face([W(x0, y0, z1), W(x1, y0, z1), W(x1, y1, z1), W(x0, y1, z1)], top, rnd, null, 0, 0.8);
-}
-function frontPt() {
-  return Math.atan2(CR, SR);
-}
-function onFront(x0, x1, y1, xc, w, z0, h) {
-  return [W(xc - w / 2, y1, z0), W(xc + w / 2, y1, z0), W(xc + w / 2, y1, z0 + h), W(xc - w / 2, y1, z0 + h)];
-}
-function door2(xc, y1, z0, w, h, rnd, col) {
-  face(
-    onFront(0, 0, y1, xc, w, z0, h),
-    col || AC.guede,
-    rnd,
-    (sp, c) => {
-      A.g.strokeStyle = sh(c, 0.7);
-      A.g.lineWidth = 0.6;
-      const [a, b, cc, d] = bbox(sp);
-      A.g.beginPath();
-      A.g.moveTo((a + cc) / 2, b);
-      A.g.lineTo((a + cc) / 2, d);
-      A.g.stroke();
-    },
-    0,
-    0.8,
-  );
-}
-function win2(xc, y1, z0, rnd) {
-  face(onFront(0, 0, y1, xc, 0.07, z0, 4), '#2b2b33', rnd, null, 0, 0.6);
-  for (const s of [-1, 1]) face(onFront(0, 0, y1, xc + s * 0.06, 0.05, z0, 4), AC.guede, rnd, null, 0, 0.5);
-}
-function gable2(x0, y0, x1, y1, z, h, col, rnd, endCol, kind) {
-  const ym = (y0 + y1) / 2,
-    X0 = x0 - 0.06,
-    X1 = x1 + 0.06,
-    Y0 = y0 - 0.08,
-    Y1 = y1 + 0.08,
-    left = vis(-1, 0),
-    xw = left ? x0 : x1,
-    xe = left ? X0 : X1;
-  const dB = [W(0, Y0)[0] - W(0, ym)[0], W(0, Y0, 0)[1] - W(0, ym, h)[1]],
-    dF = [W(0, Y1)[0] - W(0, ym)[0], W(0, Y1, 0)[1] - W(0, ym, h)[1]],
-    nb = Math.hypot(...dB) || 1,
-    nf = Math.hypot(...dF) || 1;
-  const tex = kind === 'slate' ? TX.slate([1, 0.36]) : null;
-  face(
-    [W(X0, Y0, z), W(X1, Y0, z), W(X1, ym, z + h), W(X0, ym, z + h)],
-    sh(col, 1.12),
-    rnd,
-    tex || TX.thatch(dB[0] / nb, dB[1] / nb),
-    0,
-    0.9,
-  );
-  face(
-    [W(xw, y0, z), W(xw, y1, z), W(xw, ym, z + h)],
-    sh(endCol || AC.chaux, fshade(left ? -1 : 1, 0) * 1.08),
-    rnd,
-    endCol === AC.boisC ? TX.plank : null,
-    0.02,
-    0.9,
-  );
-  face(
-    [W(X0, ym, z + h), W(X1, ym, z + h), W(X1, Y1, z), W(X0, Y1, z)],
-    sh(col, fshade(0, 1) * 1.12),
-    rnd,
-    tex || TX.thatch(dF[0] / nf, dF[1] / nf),
-    0.02,
-    1,
-  );
-  A.g.strokeStyle = sh(col, 0.55);
-  A.g.lineWidth = 2.4;
-  A.g.lineCap = 'round';
-  A.g.beginPath();
-  const e1 = W(X0, Y1, z),
-    e2 = W(X1, Y1, z);
-  A.g.moveTo(e1[0], e1[1]);
-  A.g.lineTo(e2[0], e2[1]);
-  A.g.stroke();
-  const v1 = W(xe, Y0, z),
-    v2 = W(xe, ym, z + h),
-    v3 = W(xe, Y1, z);
-  A.g.lineWidth = 2.6;
-  A.g.beginPath();
-  A.g.moveTo(v1[0], v1[1]);
-  A.g.lineTo(v2[0], v2[1]);
-  A.g.lineTo(v3[0], v3[1]);
-  A.g.stroke();
-  pencil([W(X0, ym, z + h + 1), W(X1, ym, z + h + 1)], false, 1.6, rnd);
-}
-function hip2(X0, Y0, X1, Y1, z, h, col, rnd, ins, kind) {
-  const cx = (X0 + X1) / 2,
-    cy = (Y0 + Y1) / 2,
-    a = ins ? [X0 + ins, Y0 + ins, X1 - ins, Y1 - ins] : [cx, cy, cx, cy],
-    zh = z + h;
-  const fs = [
-    [
-      [
-        [X0, Y0, z],
-        [X1, Y0, z],
-        [a[2], a[1], zh],
-        [a[0], a[1], zh],
-      ],
-      0,
-      -1,
-    ],
-    [
-      [
-        [X0, Y0, z],
-        [a[0], a[1], zh],
-        [a[0], a[3], zh],
-        [X0, Y1, z],
-      ],
-      -1,
-      0,
-    ],
-    [
-      [
-        [X0, Y1, z],
-        [a[0], a[3], zh],
-        [a[2], a[3], zh],
-        [X1, Y1, z],
-      ],
-      0,
-      1,
-    ],
-    [
-      [
-        [X1, Y0, z],
-        [X1, Y1, z],
-        [a[2], a[3], zh],
-        [a[2], a[1], zh],
-      ],
-      1,
-      0,
-    ],
-  ];
-  fs.sort((p, q) => p[1] * SR + p[2] * CR - (q[1] * SR + q[2] * CR));
-  for (const [pp, nx, ny] of fs) {
-    const sp = pp.map(p => W(p[0], p[1], p[2])),
-      v = vis(nx, ny),
-      f = v ? fshade(nx, ny) * 1.15 : 1.12,
-      e = [sp[pp.length - 1][0] - sp[0][0], sp[pp.length - 1][1] - sp[0][1]],
-      en = Math.hypot(...e) || 1;
-    face(
-      sp,
-      sh(col, f),
-      rnd,
-      kind === 'slate' ? TX.slate([e[0] / en, e[1] / en]) : TX.thatch(0, 1),
-      v && f < 0.85 ? 0.025 : 0,
-      v ? 1 : 0.7,
-    );
-  }
-}
-for (const k of ['stone', 'plank', 'chaux']) TX[k].surf = 1;
-{
-  const t0 = TX.thatch,
-    s0 = TX.slate;
-  TX.thatch = (a, b) => {
-    const f = t0(a, b);
-    f.surf = 1;
-    return f;
-  };
-  TX.slate = d => {
-    const f = s0(d);
-    f.surf = 1;
-    return f;
-  };
-}
-const NC = 8;
-function cyl(cx, cy, r, z0, z1, col, rnd, tex) {
-  const bot = [],
-    top = [];
-  for (let k = 0; k < NC; k++) {
-    const a0 = (k / NC) * Math.PI * 2,
-      a1 = ((k + 1) / NC) * Math.PI * 2,
-      am = (a0 + a1) / 2,
-      nx = Math.cos(am),
-      ny = Math.sin(am);
-    if (!vis(nx, ny)) continue;
-    const sp = [
-      W(cx + Math.cos(a0) * r, cy + Math.sin(a0) * r, z0),
-      W(cx + Math.cos(a1) * r, cy + Math.sin(a1) * r, z0),
-      W(cx + Math.cos(a1) * r, cy + Math.sin(a1) * r, z1),
-      W(cx + Math.cos(a0) * r, cy + Math.sin(a0) * r, z1),
-    ];
-    const f = fshade(nx, ny),
-      c1 = sh(col, f * 1.1 * (1 + (rnd() - 0.5) * 0.08)),
-      c2 = sh(col, f * 1.1 * (0.94 + (rnd() - 0.5) * 0.06));
-    P([sp[0], sp[1], sp[2]], c1, c1, 0.7);
-    P([sp[0], sp[2], sp[3]], c2, c2, 0.7);
-  }
-  const outl = [];
-  for (let k = 0; k <= 24; k++) {
-    const a = (k / 24) * Math.PI * 2;
-    const nx = Math.cos(a),
-      ny = Math.sin(a);
-    if (nx * SR + ny * CR >= -0.05) outl.push([a, W(cx + nx * r, cy + ny * r, z0)]);
-  }
-  outl.sort((p, q) => p[1][0] - q[1][0]);
-  if (outl.length > 1) {
-    const L = outl.map(p => p[1]);
-    pencil(L, false, 0.9, rnd);
-    const l = L[0],
-      rr = L[L.length - 1];
-    pencil([l, [l[0], l[1] - (z1 - z0)]], false, 0.9, rnd);
-    pencil([rr, [rr[0], rr[1] - (z1 - z0)]], false, 0.9, rnd);
-  }
-}
-function cone(cx, cy, r, z, h, col, rnd, kind) {
-  const ap = W(cx - 0.015, cy - 0.02, z + h),
-    fs = [];
-  for (let k = 0; k < NC; k++) {
-    const a0 = (k / NC) * Math.PI * 2,
-      a1 = ((k + 1) / NC) * Math.PI * 2,
-      am = (a0 + a1) / 2;
-    fs.push([a0, a1, Math.cos(am), Math.sin(am)]);
-  }
-  fs.sort((p, q) => p[2] * SR + p[3] * CR - (q[2] * SR + q[3] * CR));
-  for (const [a0, a1, nx, ny] of fs) {
-    const sp = [W(cx + Math.cos(a0) * r, cy + Math.sin(a0) * r, z), W(cx + Math.cos(a1) * r, cy + Math.sin(a1) * r, z), ap];
-    const v = nx * SR + ny * CR > 0,
-      f = v ? Math.min(1.25, fshade(nx, ny) * 1.18 + 0.06) : 1.1;
-    P(sp, sh(col, f), sh(col, f), 0.8);
-    if (v) {
-      const m0 = [sp[0][0] + (ap[0] - sp[0][0]) * 0.45, sp[0][1] + (ap[1] - sp[0][1]) * 0.45],
-        m1 = [sp[1][0] + (ap[0] - sp[1][0]) * 0.45, sp[1][1] + (ap[1] - sp[1][1]) * 0.45],
-        c2 = sh(col, f * (1.07 + (rnd() - 0.5) * 0.05));
-      P([m0, m1, ap], c2, c2, 0.7);
-      const c3 = sh(col, f * (0.95 + (rnd() - 0.5) * 0.05));
-      P([sp[0], sp[1], m1], c3, c3, 0.6);
-    }
-  }
-  const base = [];
-  for (let k = 0; k <= 24; k++) {
-    const a = (k / 24) * Math.PI * 2,
-      nx = Math.cos(a),
-      ny = Math.sin(a);
-    if (nx * SR + ny * CR >= -0.2) base.push(W(cx + nx * r, cy + ny * r, z));
-  }
-  base.sort((p, q) => p[0] - q[0]);
-  A.g.strokeStyle = sh(col, 0.55);
-  A.g.lineWidth = 2.4;
-  A.g.lineCap = 'round';
-  A.g.beginPath();
-  base.forEach((p, k) => (k ? A.g.lineTo(p[0], p[1]) : A.g.moveTo(p[0], p[1])));
-  A.g.stroke();
-  pencil(base, false, 1, rnd);
-  pencil([base[0], ap, base[base.length - 1]], false, 1, rnd);
-}
-function cylDoor(cx, cy, r, z0, h, rnd, col) {
-  const a = frontPt(),
-    x = cx + Math.cos(a) * r,
-    y = cy + Math.sin(a) * r,
-    t = [-Math.sin(a) * 0.06, Math.cos(a) * 0.06];
-  face(
-    [W(x - t[0], y - t[1], z0), W(x + t[0], y + t[1], z0), W(x + t[0], y + t[1], z0 + h), W(x - t[0], y - t[1], z0 + h)],
-    col || AC.guede,
-    rnd,
-    null,
-    0,
-    0.8,
-  );
-}
-function ground(s, col, rnd, ins) {
-  for (const [ox, oy] of FOOT[s]) {
-    const sp = [];
-    for (let k = 0; k < 6; k++) {
-      const [x, y] = corner(ox, oy, k, HR * (ins || 0.9));
-      sp.push(W(x, y, 0.4));
-    }
-    const rp = roundPts(sp, 4);
-    pathPts(rp, true);
-    A.g.fillStyle = col;
-    A.g.fill();
-    A.g.save();
-    pathPts(rp, true);
-    A.g.clip();
-    facets(sp, col, rnd, 0.1);
-    A.g.restore();
-    pencil(rp, true, 0.6, rnd, INK, 0.35);
-  }
-}
-function post(x, y, z0, z1, rnd, col) {
-  const a = W(x, y, z0),
-    b = W(x, y, z1);
-  A.g.strokeStyle = col || AC.bois;
-  A.g.lineWidth = 2.2;
-  A.g.lineCap = 'round';
-  A.g.beginPath();
-  A.g.moveTo(a[0], a[1]);
-  A.g.lineTo(b[0], b[1]);
-  A.g.stroke();
-  pencil(
-    [
-      [a[0] + 1.3, a[1]],
-      [b[0] + 1.3, b[1]],
-    ],
-    false,
-    0.5,
-    rnd,
-  );
-}
-function barrel3(x, y, rnd) {
-  cyl(x, y, 0.045, 0, 7, AC.bois, rnd);
-  const t = W(x, y, 7);
-  A.g.fillStyle = AC.boisC;
-  A.g.beginPath();
-  A.g.ellipse(t[0], t[1], 2.4, 1.4, 0, 0, 7);
-  A.g.fill();
-  for (const z of [2, 5]) {
-    const p = W(x, y, z);
-    A.g.strokeStyle = '#3e3228';
-    A.g.lineWidth = 0.6;
-    A.g.beginPath();
-    A.g.ellipse(p[0], p[1], 2.6, 1.5, 0, 0, Math.PI);
-    A.g.stroke();
-  }
-}
-function crate3(x, y, sz, rnd) {
-  box(x - sz, y - sz, x + sz, y + sz, 0, sz * 60, AC.boisC, rnd, TX.plank, sh(AC.boisC, 1.15));
-}
-function amph3(x, y, rnd) {
-  const p = W(x, y);
-  const sp = [
-    [p[0] - 2.5, p[1]],
-    [p[0] - 3.4, p[1] - 6],
-    [p[0] - 1.2, p[1] - 11],
-    [p[0] + 1.2, p[1] - 11],
-    [p[0] + 3.4, p[1] - 6],
-    [p[0] + 2.5, p[1]],
-  ];
-  const rp = roundPts(sp, 2);
-  pathPts(rp, true);
-  A.g.fillStyle = AC.ocre;
-  A.g.fill();
-  A.g.fillStyle = sh(AC.ocre, 0.75);
-  A.g.beginPath();
-  A.g.ellipse(p[0] + 1.4, p[1] - 5, 1.4, 4, 0, 0, 7);
-  A.g.fill();
-  pencil(rp, true, 0.6, rnd);
-}
-function logs3(x, y, n, rnd) {
-  for (let k = 0; k < n; k++) {
-    const row = k < 3 ? 0 : 1,
-      i = row ? k - 3 : k,
-      a = W(x - 0.12, y + i * 0.06, 1.8 + row * 3.2),
-      b = W(x + 0.12, y + i * 0.06, 1.8 + row * 3.2);
-    A.g.strokeStyle = AC.bois;
-    A.g.lineWidth = 3.4;
-    A.g.lineCap = 'round';
-    A.g.beginPath();
-    A.g.moveTo(a[0], a[1]);
-    A.g.lineTo(b[0], b[1]);
-    A.g.stroke();
-    A.g.fillStyle = '#e0c08a';
-    A.g.beginPath();
-    A.g.ellipse(b[0], b[1], 1.7, 1.6, 0, 0, 7);
-    A.g.fill();
-    pencil(
-      [
-        [a[0], a[1] - 1.7],
-        [b[0], b[1] - 1.7],
-      ],
-      false,
-      0.5,
-      rnd,
-    );
-  }
-}
-function fence3(pts, h, rnd) {
-  for (let k = 0; k < pts.length; k++) {
-    const p = pts[k];
-    post(p[0], p[1], 0, h, rnd, AC.boisC);
-  }
-  for (const z of [h * 0.4, h * 0.8]) {
-    const L = pts.map(p => W(p[0], p[1], z));
-    A.g.strokeStyle = AC.bois;
-    A.g.lineWidth = 1;
-    A.g.beginPath();
-    L.forEach((p, k) => (k ? A.g.lineTo(p[0], p[1]) : A.g.moveTo(p[0], p[1])));
-    A.g.stroke();
-  }
-}
-function ring(cx, cy, rx, ry, n) {
-  const o = [];
-  for (let k = 0; k < n; k++) {
-    const a = (k / n) * Math.PI * 2;
-    o.push([cx + Math.cos(a) * rx, cy + Math.sin(a) * ry]);
-  }
-  return o;
-}
-function banner(x, y, z0, h, col, rnd) {
-  post(x, y, z0, z0 + h, rnd, '#5a4030');
-  const p = W(x, y, z0 + h);
-  const sp = [
-    [p[0] + 1, p[1]],
-    [p[0] + 13, p[1] - 2],
-    [p[0] + 12, p[1] + 8],
-    [p[0] + 1, p[1] + 9],
-  ];
-  const rp = roundPts(sp, 2);
-  pathPts(rp, true);
-  A.g.fillStyle = col;
-  A.g.fill();
-  pencil(rp, true, 0.6, rnd);
-  A.g.strokeStyle = AC.chaux;
-  A.g.lineWidth = 0.8;
-  A.g.beginPath();
-  A.g.arc(p[0] + 7, p[1] + 3.6, 2, 0, 5.2);
-  A.g.stroke();
-}
-function shield3(x, y, z, col, rnd) {
-  const p = W(x, y, z);
-  A.g.fillStyle = col;
-  A.g.beginPath();
-  A.g.ellipse(p[0], p[1], 2.6, 4.2, 0, 0, 7);
-  A.g.fill();
-  A.g.fillStyle = AC.chaux;
-  A.g.beginPath();
-  A.g.arc(p[0], p[1], 0.9, 0, 7);
-  A.g.fill();
-  pencil(smoothPts(irregular(p[0], p[1], 2.6, 4.2, 8, rnd, 0.05)), true, 0.5, rnd);
-}
-function menhir3(x, y, h, rnd) {
-  const p = W(x, y);
-  softShadow(p[0] + 4, p[1] + 1, 6, 2.4);
-  const sp = [
-    [p[0] - 4, p[1]],
-    [p[0] - 4.5, p[1] - h * 0.55],
-    [p[0] - 2, p[1] - h],
-    [p[0] + 2.5, p[1] - h * 0.94],
-    [p[0] + 4.5, p[1] - h * 0.5],
-    [p[0] + 4, p[1]],
-  ];
-  const rp = roundPts(sp, 2.5);
-  pathPts(rp, true);
-  A.g.fillStyle = AC.granit;
-  A.g.fill();
-  A.g.save();
-  pathPts(rp, true);
-  A.g.clip();
-  A.g.fillStyle = AC.granitD;
-  A.g.fillRect(p[0] + 0.6, p[1] - h - 2, 6, h + 3);
-  hatchClip(sp, rnd, 0.05);
-  A.g.fillStyle = '#e2d68c';
-  A.g.beginPath();
-  A.g.ellipse(p[0] - 1, p[1] - h * 0.6, 1.2, 0.8, 0, 0, 7);
-  A.g.fill();
-  A.g.restore();
-  pencil(rp, true, 0.9, rnd);
-}
-function bArt2(key, s, fn) {
+/** Sprite d'un bâtiment d'emprise s, dessiné dans le repère du plan centré sur le bâtiment. */
+function bArt2(key: string, s: number, fn: (rnd: Rand) => void): Sprite {
   return sprite('B2' + key, -(s * 44 + 60), -175, s * 44 + 60, s * 34 + 40, rnd => {
     const p = A.LOC;
     A.LOC = null;
@@ -651,12 +54,14 @@ function bArt2(key, s, fn) {
     }
   });
 }
-function bSprite(b) {
+/** Sprite d'un bâtiment dans son état actuel (niveau de la maison, saison du champ, avancement du chantier). */
+function bSprite(b: Building): Sprite {
   const t = b.type,
     v = b.id % 3,
     s = b.s;
   if (t === 'hut') {
-    if (b.pop <= 0 && b.inc <= 0)
+    const h = b as House;
+    if (h.pop <= 0 && h.inc <= 0)
       return bArt2('plot', 1, rnd => {
         ground(1, '#c7ae84', rnd, 0.72);
         const R = ring(0, 0, 0.3, 0.3, 6);
@@ -670,24 +75,25 @@ function bSprite(b) {
         });
         A.g.stroke();
       });
-    return bArt2('h' + b.lvl + '_' + v, 1, rnd => houseArt(b.lvl, v, rnd));
+    return bArt2('h' + h.lvl + '_' + v, 1, rnd => houseArt(h.lvl, v, rnd));
   }
   if (t === 'farm') {
-    const st = Math.min(3, Math.floor((b.prog / B.farm.time) * 4));
+    const st = Math.min(3, Math.floor(((b.prog ?? 0) / B.farm.time!) * 4));
     return bArt2('farm' + st, 2, rnd => farmArt2(st, rnd));
   }
-  if (t.startsWith('t_')) return bArt2(t, 3, rnd => templeArt2(B[t].god, rnd));
+  if (t.startsWith('t_')) return bArt2(t, 3, rnd => templeArt2(B[t].god!, rnd));
   if (B[t].mon) {
     const st = b.done ? 2 : monProg(b) >= 0.5 ? 1 : 0;
     return bArt2(t + st, 3, rnd => monArt2(t, st, rnd));
   }
   return bArt2(t, s, rnd => (ART2[t] || ART2.store)(rnd));
 }
-function houseArt(L, v, rnd) {
+/** Maison de niveau L (1 hutte ronde à 4 demeure noble), variante v. */
+function houseArt(L: number, v: number, rnd: Rand): void {
   if (L === 1) {
     ground(1, '#c9b08a', rnd, 0.62);
     if (v === 0) logs3(0.26, 0.1, 3, rnd);
-    cyl(0, 0, 0.22, 0, 8, AC.granit, rnd, TX.stone);
+    cyl(0, 0, 0.22, 0, 8, AC.granit, rnd);
     cylDoor(0, 0, 0.22, 0, 6.5, rnd);
     cone(0, 0, 0.3, 8, 19, AC.chaume, rnd);
     if (v === 1) barrel3(0.27, 0.16, rnd);
@@ -696,8 +102,8 @@ function houseArt(L, v, rnd) {
   if (L === 2) {
     ground(1, '#cdb690', rnd, 0.72);
     if (v === 1) logs3(0.3, -0.05, 4, rnd);
-    cyl(0, 0, 0.27, 0, 4, AC.granit, rnd, TX.stone);
-    cyl(0, 0, 0.27, 4, 11, AC.chaux, rnd, TX.chaux);
+    cyl(0, 0, 0.27, 0, 4, AC.granit, rnd);
+    cyl(0, 0, 0.27, 4, 11, AC.chaux, rnd);
     cylDoor(0, 0, 0.27, 0, 8, rnd);
     cone(0, 0, 0.37, 11, 23, AC.chaume, rnd);
     if (v === 0) barrel3(0.3, 0.18, rnd);
@@ -709,8 +115,8 @@ function houseArt(L, v, rnd) {
   }
   if (L === 3) {
     ground(1, '#d0bb98', rnd, 0.82);
-    box(-0.34, -0.15, 0.34, 0.15, 0, 3, AC.granit, rnd, TX.stone);
-    box(-0.34, -0.15, 0.34, 0.15, 3, 10, AC.chaux, rnd, TX.chaux);
+    box(-0.34, -0.15, 0.34, 0.15, 0, 3, AC.granit, rnd);
+    box(-0.34, -0.15, 0.34, 0.15, 3, 10, AC.chaux, rnd);
     door2(-0.05, 0.15, 0, 0.11, 8, rnd);
     win2(0.18, 0.15, 4.5, rnd);
     gable2(-0.34, -0.15, 0.34, 0.15, 10, 13, AC.chaume, rnd, AC.chaux);
@@ -719,25 +125,26 @@ function houseArt(L, v, rnd) {
     return;
   }
   ground(1, '#d6c3a2', rnd, 0.86);
-  cyl(0.27, -0.13, 0.11, 0, 16, AC.granit, rnd, TX.stone);
+  cyl(0.27, -0.13, 0.11, 0, 16, AC.granit, rnd);
   cone(0.27, -0.13, 0.15, 16, 12, AC.ardoise, rnd, 'slate');
-  box(-0.37, -0.14, 0.3, 0.17, 0, 3, AC.granit, rnd, TX.stone);
-  box(-0.37, -0.14, 0.3, 0.17, 3, 12, AC.chaux, rnd, TX.chaux);
+  box(-0.37, -0.14, 0.3, 0.17, 0, 3, AC.granit, rnd);
+  box(-0.37, -0.14, 0.3, 0.17, 3, 12, AC.chaux, rnd);
   door2(-0.04, 0.17, 0, 0.12, 9, rnd, AC.ocre);
   win2(-0.24, 0.17, 5, rnd);
   win2(0.17, 0.17, 5, rnd);
   for (const [x, c] of [
     [-0.15, AC.guede],
     [0.07, AC.ocre],
-  ])
+  ] as const)
     shield3(x, 0.17, 8, c, rnd);
   gable2(-0.37, -0.14, 0.3, 0.17, 12, 15, AC.chaume, rnd, AC.chaux);
   banner(-0.36, 0.22, 0, 30, AC.guede, rnd);
 }
-function farmArt2(st, rnd) {
+/** Champ de blé et sa grange ; st de 0 (labour) à 3 (moisson). */
+function farmArt2(st: number, rnd: Rand): void {
   const col = ['#a07a52', '#93905a', '#7fa05a', '#e3bd55'][st];
   for (const [ox, oy] of FOOT[2]) {
-    const sp = [];
+    const sp: Pt[] = [];
     for (let k = 0; k < 6; k++) {
       const [x, y] = corner(ox, oy, k, HR * 0.92);
       sp.push(W(x, y, 0.4));
@@ -775,7 +182,7 @@ function farmArt2(st, rnd) {
     pencil(rp, true, 0.7, rnd, INK, 0.5);
   }
   ground(1, '#bfa580', rnd, 0.22);
-  cyl(-0.02, -0.04, 0.09, 0, 5, AC.granit, rnd, TX.stone);
+  cyl(-0.02, -0.04, 0.09, 0, 5, AC.granit, rnd);
   cone(-0.02, -0.04, 0.13, 5, 10, AC.chaume, rnd);
   if (st === 3) {
     for (const [x, y] of [
@@ -796,16 +203,16 @@ function farmArt2(st, rnd) {
     }
   }
 }
-function templeArt2(god, rnd) {
-  const GC = { taranis: '#6f8fc4', belenos: '#ecc63f', epona: '#c4643e' }[god];
+function templeArt2(god: string, rnd: Rand): void {
+  const GC = ({ taranis: '#6f8fc4', belenos: '#ecc63f', epona: '#c4643e' } as Record<string, string>)[god];
   ground(3, AC.pave, rnd, 0.92);
-  box(-0.62, -0.62, 0.62, 0.62, 0, 9, AC.chaux, rnd, TX.chaux);
+  box(-0.62, -0.62, 0.62, 0.62, 0, 9, AC.chaux, rnd);
   for (let k = -2; k <= 2; k++) {
     const x = k * 0.24;
-    face(onFront(0, 0, 0.62, x, 0.08, 0, 7), '#3a3530', rnd, null, 0, 0.5);
+    face(onFront(0, 0, 0.62, x, 0.08, 0, 7), '#3a3530', rnd, null, 0.5);
   }
   hip2(-0.7, -0.7, 0.7, 0.7, 9, 8, AC.ardoise, rnd, 0.38, 'slate');
-  box(-0.3, -0.3, 0.3, 0.3, 17, 36, AC.chaux, rnd, TX.chaux);
+  box(-0.3, -0.3, 0.3, 0.3, 17, 36, AC.chaux, rnd);
   door2(0, 0.3, 17, 0.12, 9, rnd, GC);
   const [sx, sy] = W(0, 0.3, 30);
   A.g.strokeStyle = GC;
@@ -840,13 +247,7 @@ function templeArt2(god, rnd) {
   }
   hip2(-0.36, -0.36, 0.36, 0.36, 36, 16, AC.ardoise, rnd, 0, 'slate');
   banner(0.75, 0.6, 0, 40, GC, rnd);
-  const al = [
-    [-0.2, 0.85],
-    [0.2, 0.85],
-    [0.2, 0.98],
-    [-0.2, 0.98],
-  ];
-  box(-0.16, 0.82, 0.16, 0.98, 0, 4, AC.granit, rnd, TX.stone, AC.granit);
+  box(-0.16, 0.82, 0.16, 0.98, 0, 4, AC.granit, rnd, null, AC.granit);
   for (const [x, y] of [
     [-0.9, 0.3],
     [0.9, 0.3],
@@ -854,10 +255,11 @@ function templeArt2(god, rnd) {
   ])
     oak3(...W(x, y), 0.8, rnd, '#4a6a42');
 }
-function monArt2(t, st, rnd) {
+/** Monument t : st 0 chantier, 1 à mi-chemin, 2 achevé. */
+function monArt2(t: string, st: number, rnd: Rand): void {
   if (t === 'menhirs') {
     ground(3, st < 2 ? '#b8a07a' : '#7fa465', rnd, 0.94);
-    const sp = [];
+    const sp: [number, number, number, number][] = [];
     for (let r = 0; r < 3; r++)
       for (let k = 0; k < 6; k++) sp.push([-1.05 + k * 0.42, -0.55 + r * 0.55, 22 + (5 - k) * 3 + rnd() * 6, r * 6 + k]);
     sp.sort((a, b) => DP2(a[0], a[1]) - DP2(b[0], b[1]));
@@ -914,8 +316,8 @@ function monArt2(t, st, rnd) {
       boulder3(...W(Math.cos(a) * 1.45, Math.sin(a) * 1.1), 0.42, rnd);
     }
     if (st === 0) {
-      box(-0.2, -0.1, -0.12, 0.25, 0, 14, AC.granit, rnd, TX.stone);
-      box(0.12, -0.1, 0.2, 0.25, 0, 14, AC.granit, rnd, TX.stone);
+      box(-0.2, -0.1, -0.12, 0.25, 0, 14, AC.granit, rnd);
+      box(0.12, -0.1, 0.2, 0.25, 0, 14, AC.granit, rnd);
       box(-0.28, -0.15, 0.28, 0.3, 14, 18, AC.granitD, rnd, null, AC.granit);
       logs3(0.9, 0.8, 5, rnd);
     } else {
@@ -930,7 +332,6 @@ function monArt2(t, st, rnd) {
         '#241c16',
         rnd,
         null,
-        0,
         0.9,
       );
       face(
@@ -943,7 +344,6 @@ function monArt2(t, st, rnd) {
         AC.granit,
         rnd,
         null,
-        0,
         0.9,
       );
     }
@@ -962,7 +362,7 @@ function monArt2(t, st, rnd) {
     A.g.ellipse(p[0], p[1], 18, 9, 0, 0, 7);
     A.g.fill();
     pencil(smoothPts(irregular(p[0], p[1], 18, 9, 10, rnd, 0.05)), true, 0.8, rnd);
-    box(-0.18, -0.4, 0.18, -0.25, 0, 7, AC.granit, rnd, TX.stone, AC.granit);
+    box(-0.18, -0.4, 0.18, -0.25, 0, 7, AC.granit, rnd, null, AC.granit);
   }
   if (st === 2)
     for (const [x, y] of [
@@ -1012,10 +412,11 @@ function monArt2(t, st, rnd) {
       }
   }
 }
-const ART2 = {
+/** Dessins des autres bâtiments, par type. */
+const ART2: Record<string, (rnd: Rand) => void> = {
   well(rnd) {
     ground(1, AC.pave, rnd, 0.55);
-    cyl(0, 0, 0.15, 0, 6, AC.granit, rnd, TX.stone);
+    cyl(0, 0, 0.15, 0, 6, AC.granit, rnd);
     const t = W(0, 0, 6);
     A.g.fillStyle = AC.granit;
     A.g.beginPath();
@@ -1033,7 +434,7 @@ const ART2 = {
   pigs(rnd) {
     ground(2, '#8a6a4a', rnd, 0.94);
     const sty = FOOT[2][0];
-    box(sty[0] - 0.2, sty[1] - 0.14, sty[0] + 0.2, sty[1] + 0.14, 0, 7, AC.boisC, rnd, TX.plank);
+    box(sty[0] - 0.2, sty[1] - 0.14, sty[0] + 0.2, sty[1] + 0.14, 0, 7, AC.boisC, rnd);
     gable2(sty[0] - 0.2, sty[1] - 0.14, sty[0] + 0.2, sty[1] + 0.14, 7, 8, AC.chaume, rnd, AC.boisC);
     const tr = W(0.15, 0.45);
     face(
@@ -1046,7 +447,6 @@ const ART2 = {
       AC.bois,
       rnd,
       null,
-      0,
       0.6,
     );
     const rim = ring(0, 0.05, 0.95, 0.85, 22)
@@ -1064,7 +464,7 @@ const ART2 = {
       [0, 0.2],
     ])
       post(x, y, 0, 10, rnd);
-    box(-0.32, -0.24, 0.32, 0.24, 10, 21, AC.boisC, rnd, TX.plank);
+    box(-0.32, -0.24, 0.32, 0.24, 10, 21, AC.boisC, rnd);
     door2(0, 0.24, 10, 0.12, 8, rnd);
     gable2(-0.32, -0.24, 0.32, 0.24, 21, 15, AC.chaume, rnd, AC.boisC);
     for (let k = 0; k < 5; k++) {
@@ -1081,7 +481,7 @@ const ART2 = {
       [0.62, 0.15],
       [-0.62, 0.15],
     ]) {
-      cyl(x, y, 0.12, 0, 6, AC.granit, rnd, TX.stone);
+      cyl(x, y, 0.12, 0, 6, AC.granit, rnd);
       cone(x, y, 0.16, 6, 11, AC.chaume, rnd);
     }
   },
@@ -1107,7 +507,7 @@ const ART2 = {
           [x0, y1],
         ])
           post(x, y, 0, 13, rnd);
-        box(x0 + 0.04, y0 + 0.04, x1 - 0.04, y1 - 0.04, 0, 5, AC.boisC, rnd, TX.plank, sh(AC.boisC, 1.12));
+        box(x0 + 0.04, y0 + 0.04, x1 - 0.04, y1 - 0.04, 0, 5, AC.boisC, rnd, null, sh(AC.boisC, 1.12));
         for (let q = 0; q < 4; q++) {
           const p = W(x0 + 0.1 + q * 0.08, oy, 5);
           A.g.fillStyle = [AC.ajonc, '#e3a0a0', AC.ocre, '#8dbb5e'][(q + k) % 4];
@@ -1135,14 +535,13 @@ const ART2 = {
               );
             }
           },
-          0,
           0.8,
         );
       });
   },
   wood(rnd) {
     ground(1, '#b39a74', rnd, 0.7);
-    cyl(-0.12, -0.08, 0.15, 0, 6, AC.granit, rnd, TX.stone);
+    cyl(-0.12, -0.08, 0.15, 0, 6, AC.granit, rnd);
     cone(-0.12, -0.08, 0.2, 6, 13, AC.chaume, rnd);
     logs3(0.18, 0.14, 5, rnd);
     const p = W(0.22, -0.14);
@@ -1158,7 +557,7 @@ const ART2 = {
   },
   quarry(rnd) {
     ground(1, '#a39590', rnd, 0.82);
-    box(-0.3, -0.3, 0.02, -0.02, 0, 16, AC.granitD, rnd, TX.stone, AC.granit);
+    box(-0.3, -0.3, 0.02, -0.02, 0, 16, AC.granitD, rnd, null, AC.granit);
     box(0.05, 0.08, 0.25, 0.25, 0, 6, AC.granit, rnd, null, sh(AC.granit, 1.1));
     box(-0.24, 0.1, -0.04, 0.28, 0, 6, AC.granit, rnd, null, sh(AC.granit, 1.1));
     box(-0.18, 0.14, -0.06, 0.24, 6, 11, AC.granit, rnd, null, sh(AC.granit, 1.1));
@@ -1193,7 +592,6 @@ const ART2 = {
       '#1c1612',
       rnd,
       null,
-      0,
       0.8,
     );
     post(-0.2, 0.35, 0, 17, rnd);
@@ -1206,16 +604,16 @@ const ART2 = {
     A.g.moveTo(a[0], a[1]);
     A.g.lineTo(b[0], b[1]);
     A.g.stroke();
-    box(0.45, 0.4, 0.62, 0.55, 2, 7, AC.bois, rnd, TX.plank, '#6a5a5a');
+    box(0.45, 0.4, 0.62, 0.55, 2, 7, AC.bois, rnd, null, '#6a5a5a');
   },
   brew(rnd) {
     ground(2, '#c9b08a', rnd, 0.92);
-    box(-0.55, -0.22, 0.4, 0.18, 0, 3, AC.granit, rnd, TX.stone);
-    box(-0.55, -0.22, 0.4, 0.18, 3, 12, AC.chaux, rnd, TX.chaux);
+    box(-0.55, -0.22, 0.4, 0.18, 0, 3, AC.granit, rnd);
+    box(-0.55, -0.22, 0.4, 0.18, 3, 12, AC.chaux, rnd);
     door2(-0.2, 0.18, 0, 0.13, 9, rnd);
     win2(0.14, 0.18, 5, rnd);
     gable2(-0.55, -0.22, 0.4, 0.18, 12, 14, AC.chaume, rnd, AC.chaux);
-    box(0.18, -0.14, 0.3, -0.02, 20, 32, AC.granit, rnd, TX.stone, AC.granitD);
+    box(0.18, -0.14, 0.3, -0.02, 20, 32, AC.granit, rnd, null, AC.granitD);
     for (const [x, y] of [
       [0.35, 0.45],
       [0.45, 0.38],
@@ -1231,10 +629,10 @@ const ART2 = {
   },
   forge(rnd) {
     ground(2, '#a9a098', rnd, 0.92);
-    box(-0.45, -0.25, 0.45, 0.2, 0, 12, AC.granit, rnd, TX.stone);
+    box(-0.45, -0.25, 0.45, 0.2, 0, 12, AC.granit, rnd);
     door2(0, 0.2, 0, 0.16, 9, rnd, '#3a2a20');
     hip2(-0.5, -0.3, 0.5, 0.25, 12, 10, AC.ardoise, rnd, 0, 'slate');
-    box(0.22, -0.2, 0.36, -0.06, 18, 38, AC.granitD, rnd, TX.stone, '#5a5650');
+    box(0.22, -0.2, 0.36, -0.06, 18, 38, AC.granitD, rnd, null, '#5a5650');
     const p = W(-0.3, 0.5);
     face(
       [
@@ -1246,15 +644,14 @@ const ART2 = {
       '#3a3836',
       rnd,
       null,
-      0,
       0.7,
     );
     post(-0.3, 0.5, 0, 6, rnd, '#3a3836');
-    box(0.3, 0.4, 0.55, 0.55, 0, 4, AC.bois, rnd, TX.plank, '#3f6a8a');
+    box(0.3, 0.4, 0.55, 0.55, 0, 4, AC.bois, rnd, null, '#3f6a8a');
   },
   store(rnd) {
     ground(2, '#c4ab84', rnd, 0.92);
-    box(-0.55, -0.28, 0.5, 0.22, 0, 15, AC.boisC, rnd, TX.plank);
+    box(-0.55, -0.28, 0.5, 0.22, 0, 15, AC.boisC, rnd);
     door2(0, 0.22, 0, 0.22, 11, rnd, AC.bois);
     gable2(-0.55, -0.28, 0.5, 0.22, 15, 15, AC.chaume, rnd, AC.boisC);
     crate3(0.42, 0.45, 0.07, rnd);
@@ -1285,10 +682,10 @@ const ART2 = {
     A.g.moveTo(c[0], c[1]);
     A.g.lineTo(d[0], d[1]);
     A.g.stroke();
-    box(-0.22, -0.22, 0.22, 0.22, 25, 27, AC.bois, rnd, TX.plank, AC.boisC);
+    box(-0.22, -0.22, 0.22, 0.22, 25, 27, AC.bois, rnd, null, AC.boisC);
     const [fx, fy] = W(0, 0, 27);
     figure(fx, fy, 0, AC.guede, 'soldier');
-    box(-0.22, -0.22, 0.22, 0.22, 27, 32, AC.boisC, rnd, TX.plank);
+    box(-0.22, -0.22, 0.22, 0.22, 27, 32, AC.boisC, rnd);
     for (const [x, y] of [
       [-0.2, -0.2],
       [0.2, -0.2],
@@ -1300,7 +697,7 @@ const ART2 = {
   },
   barracks(rnd) {
     ground(2, '#c4ab84', rnd, 0.92);
-    box(-0.6, -0.42, 0.6, -0.08, 0, 12, AC.boisC, rnd, TX.plank);
+    box(-0.6, -0.42, 0.6, -0.08, 0, 12, AC.boisC, rnd);
     door2(0, -0.08, 0, 0.14, 9, rnd, AC.ocre);
     gable2(-0.6, -0.42, 0.6, -0.08, 12, 13, AC.chaume, rnd, AC.boisC);
     const [dx, dy] = W(-0.3, 0.35);
@@ -1352,7 +749,7 @@ const ART2 = {
     A.g.beginPath();
     A.g.ellipse(cx, cy, 42, 26, 0, 0, 7);
     A.g.stroke();
-    const trees = [
+    const trees: [number, number][] = [
       [-0.95, -0.45],
       [0.95, -0.45],
       [0, -1],
@@ -1366,7 +763,7 @@ const ART2 = {
       [AC.ocre, -5],
       [AC.guede, 0],
       [AC.ajonc, 5],
-    ]) {
+    ] as const) {
       const p = W(0, 0, 22);
       A.g.strokeStyle = c;
       A.g.lineWidth = 1.2;
@@ -1424,8 +821,8 @@ const ART2 = {
       .filter(p => DP2(...p) < -0.1)
       .sort((a, b) => a[0] - b[0]);
     fence3(rim, 13, rnd);
-    box(-0.85, -0.32, 0.85, 0.3, 0, 4, AC.granit, rnd, TX.stone);
-    box(-0.85, -0.32, 0.85, 0.3, 4, 15, AC.chaux, rnd, TX.chaux);
+    box(-0.85, -0.32, 0.85, 0.3, 0, 4, AC.granit, rnd);
+    box(-0.85, -0.32, 0.85, 0.3, 4, 15, AC.chaux, rnd);
     door2(0, 0.3, 0, 0.18, 12, rnd, AC.ocre);
     win2(-0.45, 0.3, 7, rnd);
     win2(0.45, 0.3, 7, rnd);
@@ -1436,7 +833,7 @@ const ART2 = {
   },
   port(rnd) {
     ground(2, '#c8b996', rnd, 0.92);
-    box(-0.55, -0.3, 0.15, 0.12, 0, 11, AC.boisC, rnd, TX.plank);
+    box(-0.55, -0.3, 0.15, 0.12, 0, 11, AC.boisC, rnd);
     door2(-0.2, 0.12, 0, 0.2, 9, rnd, AC.guede);
     gable2(-0.55, -0.3, 0.15, 0.12, 11, 13, AC.chaume, rnd, AC.boisC);
     post(0.35, -0.25, 0, 18, rnd);
@@ -1461,7 +858,8 @@ const ART2 = {
 };
 ART2.trade = ART2.store;
 /* animations posées sur les nouveaux dessins (coordonnées relatives au centre du bâtiment) */
-function liveB(b, time) {
+/** Animations d'un bâtiment, dessinées dans son repère local. */
+function liveB(b: Building, time: number): void {
   const p = A.LOC,
     [ox, oy] = bc(b);
   A.LOC = { c: 0, k: 1, ox, oy, z: ZH(idx(b.x, b.y)) };
@@ -1471,7 +869,7 @@ function liveB(b, time) {
     A.LOC = p;
   }
 }
-function liveB2(b, time) {
+function liveB2(b: Building, time: number): void {
   const t = b.type;
   if (t === 'port' && A.S.dock != null && A.S.dock >= 0) {
     const p = A.LOC;
@@ -1533,13 +931,13 @@ function liveB2(b, time) {
       A.g.globalAlpha = 1;
     }
   else if (t === 'brew') {
-    if (b.wk > 0) smoke(0.24, -0.08, 34, time, 'r');
+    if ((b.wk ?? 0) > 0) smoke(0.24, -0.08, 34, time, 'r');
   } else if (t === 'forge') {
     const [px, py] = W(0, 0.2, 4);
     const f = Math.sin(time / 120) * 0.5 + 0.5;
-    A.g.fillStyle = `rgba(255,${(120 + f * 70) | 0},40,${b.wk > 0 ? 0.95 : 0.25})`;
+    A.g.fillStyle = `rgba(255,${(120 + f * 70) | 0},40,${(b.wk ?? 0) > 0 ? 0.95 : 0.25})`;
     A.g.fillRect(px - 4, py - 6, 8, 6);
-    if (b.wk > 0) {
+    if ((b.wk ?? 0) > 0) {
       blur(1);
       A.g.fillStyle = `rgba(255,150,40,${0.25 + f * 0.15})`;
       A.g.beginPath();
@@ -1568,7 +966,7 @@ function liveB2(b, time) {
     A.g.quadraticCurveTo(px, py - 12 + f, px + 4, py);
     A.g.fill();
   } else if (B[t].store) {
-    const u = used(b) / B[t].cap;
+    const u = used(b) / B[t].cap!;
     if (u > 0) {
       const [px, py] = W(0, 0, 58);
       A.g.fillStyle = 'rgba(20,20,15,.75)';
@@ -1585,12 +983,5 @@ function liveB2(b, time) {
     A.g.fillRect(px - 14, py, 28 * Math.max(0, b.hp / b.maxhp), 4);
   }
 }
-document.querySelectorAll('.vb button').forEach(
-  b =>
-    (b.onclick = () => {
-      A.view = b.dataset.v;
-      A.lastOv = '';
-    }),
-);
 
 export { bSprite, liveB };

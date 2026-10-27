@@ -11,6 +11,7 @@ npm run build      # produit dist/index.html, un fichier unique autonome
 npm test           # tests de la simulation et de la grille
 npm run typecheck  # vérification TypeScript
 npm run check      # typage, tests et construction, à lancer avant chaque commit
+npm run format     # mise en forme (Prettier) de app/, render/ et ui/
 npm run artifact   # produit dist/artifact.html, la version publiée en artefact Claude
 ```
 
@@ -65,31 +66,31 @@ src/
     palette.ts        couleurs d'Armorique
   app/                ce qui relie la simulation à l'écran
     dom.ts            canevas et accès aux éléments de la page
-    state.ts          état de l'affichage (caméra, outil, sélection, caches), partagé entre modules
-    game.ts           partie en cours, journal, messages, sauvegarde et chargement
+    state.ts          état partagé de l'affichage (partie, caméra, outil, sélection, contexte de dessin)
+    game.ts           partie en cours, chronique, actions du joueur, sauvegarde ; relie la simulation au reste
   render/             dessin : ne modifie jamais la partie
-    projection.ts     projection de la grille hexagonale à l'écran, profondeur
-    kit.ts            facettes, ombrage, trait de crayon, caches de sprites
-    terrain.ts        relief continu, mer, littoral, blocs de terrain en cache
-    decor.ts          forêts, rochers, lande, sites anciens
-    buildings.ts      bâtiments en facettes
-    units.ts          marcheurs, pillards, guerriers, navires, remparts
-    fx.ts             effets passagers (foudre, flammes, fumée)
-    overlays.ts       vues de couverture (eau, marché, culte, bardes, tribut)
-    renderer.ts       assemblage d'une image
+    types.ts          types communs du dessin (points, sprites, repère local)
+    projection.ts     projection de la grille hexagonale à l'écran, altitude, profondeur
+    kit.ts            nuances, sprites en cache, polygones, contour au crayon
+    terrain.ts        relief en facettes, mer, falaises, chemins, remparts, blocs de terrain en cache
+    decor.ts          forêts, rochers, chêne isolé, sites anciens, trait hésitant
+    buildkit.ts       primitives des bâtiments : faces, boîtes, toits, cylindres, accessoires
+    buildings.ts      dessins des bâtiments et leurs animations
+    units.ts          marcheurs, porteurs, guerriers, pillards, navires, fumées
+    fx.ts             effets passagers signalés par la simulation (navires, flèches, foudre, incendies)
+    overlays.ts       vues de couverture : passages des marcheurs, maisons servies, zone atteignable
+    renderer.ts       assemblage d'une image, dans l'ordre de dessin
   ui/                 interface
-    panels.ts         barre du haut, fiches, panneau de droite, barre d'outils
+    panels.ts         barre du haut, fiches, panneau de droite, barre d'outils, légende des vues
     input.ts          souris, tactile, clavier, caméra
     loop.ts           boucle d'animation et démarrage
 tests/                tests Vitest
-tools/split.mjs       script qui a produit le premier découpage à partir de la version mono-fichier
-tools/split-render.mjs script qui a découpé l'affichage et l'interface
 tools/artifact.mjs    prépare la version construite pour la publication en artefact
 ```
 
 ## Règles d'architecture
 
-1. Les dépendances vont dans un seul sens : `data` et `core` → `world` et `sim` → `render` → `ui`.
+1. Les dépendances vont dans un seul sens : `core` → `data` → `world` → `sim` → `app` et `render` → `ui`. Un test (`tests/architecture.test.ts`) le vérifie.
 2. La simulation ne dessine rien, et l'affichage ne modifie jamais l'état du jeu.
 3. Tout l'état d'une partie vit dans un objet unique, sérialisable ; les caches graphiques n'en font pas partie.
 4. Le hasard du jeu passe par un générateur à graine, pour que les parties soient reproductibles et testables.
@@ -105,21 +106,18 @@ Le hasard de la simulation est tiré d'un état (`rs`) stocké dans la partie : 
 
 ## Où en est le découpage
 
-Fait :
-- données et réglages extraits dans `src/data` et `src/core/constants.ts` ;
-- grille hexagonale et hasard extraits dans `src/core`, avec leurs premiers tests ;
-- styles séparés de la page, construction en fichier unique avec Vite ;
-- état typé, sauvegarde versionnée avec migrations, stockage interchangeable, hasard reproductible (`core/state.ts`, `save.ts`, `storage.ts`) ;
-- génération de l'île typée et testée dans `world/` ; la grille hexagonale `core/hex.ts` est typée ;
-- `sim/` complet : toute la simulation (emplois, tribut, maisons, stocks, production, marcheurs, migrants, dieux, commerce, défense, monuments, construction, boucle) est typée, testée et tourne sans écran ; des parties de plusieurs années sont jouées dans les tests et vérifiées reproductibles, y compris après une sauvegarde ; définitions des bâtiments, maisons, ressources et priorités typées ;
-- affichage et interface découpés en modules (`app/`, `render/`, `ui/`) ; le fichier mono-bloc a disparu.
+Le code de la version mono-fichier est entièrement réparti en modules, typé et vérifié par TypeScript en mode strict :
+- `core/` et `data/` : grille, hasard, état, sauvegarde versionnée, définitions et réglages ;
+- `world/` : génération de l'île, testée sur une douzaine de graines ;
+- `sim/` : toute la simulation, qui tourne sans écran ; des parties de plusieurs années sont jouées dans les tests et vérifiées reproductibles, y compris après une sauvegarde ;
+- `app/`, `render/`, `ui/` : l'affichage et l'interface. Les scripts qui ont servi au découpage sont dans l'historique Git.
 
-L'ordre des tirages au hasard dans `world/generate.ts` fixe la forme des îles : le modifier change l'île obtenue pour une graine donnée.
+L'ordre des tirages au hasard dans `world/generate.ts` fixe la forme des îles, et celui des sprites (clé et graine) fixe leur dessin : les modifier change l'île obtenue pour une graine donnée, ou l'aspect d'un décor.
 
-À venir, dans cet ordre, chaque étape gardant le jeu jouable :
-1. typer `render/` et `ui/` module par module, en retirant les `@ts-nocheck` ;
-2. réduire l'objet partagé `app/state.ts` : chaque cache rejoint le module qui l'utilise ;
-3. passer progressivement en TypeScript strict.
+Pistes pour la suite :
+1. tester le dessin (projection, choix de la case sous la souris) dans un environnement de navigateur simulé ;
+2. retirer les champs libres (`[extra: string]: unknown`) de `GameState` et `Building` en déclarant les derniers champs ;
+3. remplacer les tables de couleurs et de coordonnées des bâtiments par des données décrites, pour ajouter un bâtiment sans écrire de code de dessin.
 
 ## Rendu visuel
 

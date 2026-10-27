@@ -1,14 +1,21 @@
 import { N } from '../core/constants';
 import { HX, HY } from '../core/hex';
+import type { Effect } from '../sim/context';
 import { A } from '../app/state';
-import { ctx } from '../app/dom';
 import { W, ZW } from './projection';
 import { ln } from './kit';
 import { shipFig } from './units';
 
-/* ---------- défense : remparts, unités, raids (voir sim/defense.ts) ---------- */
-const FX = [];
-function drawFX(time) {
+/** Effets passagers signalés par la simulation (navires, flèches, foudre, incendies) : ils ne sont pas sauvegardés. */
+const FX: Effect[] = [];
+
+/** Fait vieillir les effets d'un pas et retire ceux qui sont terminés. */
+function ageFX(): void {
+  for (const f of FX) f.t--;
+  for (let k = FX.length - 1; k >= 0; k--) if (FX[k].t <= 0) FX.splice(k, 1);
+}
+
+function drawFX(time: number): void {
   for (const f of FX) {
     if (f.k === 'ship' || f.k === 'raider') {
       const d = f.d,
@@ -37,7 +44,7 @@ function drawFX(time) {
       ln([x, y], [x - (dx / n) * 6, y - (dy / n) * 6], '#f0e6c8', 1.2);
     } else if (f.k === 'bolt') {
       const [bx, by] = W(f.x, f.y);
-      ctx.globalAlpha = Math.min(1, f.t / 6);
+      A.g.globalAlpha = Math.min(1, f.t / 6);
       A.g.strokeStyle = '#e8f0ff';
       A.g.lineWidth = 2.2;
       A.g.beginPath();
@@ -54,7 +61,7 @@ function drawFX(time) {
       A.g.beginPath();
       A.g.arc(bx, by - 4, 14, 0, 7);
       A.g.fill();
-      ctx.globalAlpha = 1;
+      A.g.globalAlpha = 1;
     } else if (f.k === 'fire') {
       for (let k = 0; k < 5; k++) {
         const ph = (time / 900 + k / 5) % 1;
@@ -68,4 +75,4 @@ function drawFX(time) {
   }
 }
 
-export { FX, drawFX };
+export { FX, ageFX, drawFX };

@@ -192,6 +192,26 @@ export interface GameState extends Grids {
   tradeOK?: boolean;
   /** Part des maisons affamées. */
   hungry?: number;
+  /** Raison pour laquelle les familles n'arrivent plus, vide sinon. */
+  block?: string;
+  /** Solde du mois lissé, tribut du mois écoulé. */
+  lastBal?: number;
+  balAvg?: number;
+  lastTaxM?: number;
+
+  /* ---- raids ---- */
+  /** Raids activés (false : désactivés par le joueur). */
+  raids?: boolean;
+  /** Raid en cours, annoncé pour le mois prochain, mois du prochain raid, case de débarquement. */
+  raid?: number;
+  raidWarn?: number;
+  raidNext?: number;
+  raidFrom?: number;
+  /** Bilan du raid en cours : butin emporté, guerriers tombés, rempart percé. */
+  loot?: number;
+  fallen?: number;
+  breach?: number;
+
 
   /* ---- réglages du joueur ---- */
   /** Foudre de Taranis sur les bâtiments quand Toutatis est négligé (désactivable). */

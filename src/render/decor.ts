@@ -1,19 +1,34 @@
-// @ts-nocheck — à typer (en cours).
-import { nb4 } from '../core/hex';
+/**
+ * Décors naturels dessinés au crayon : forêts qui couvrent leur case, rochers, chêne isolé, sites anciens.
+ * Volumes arrondis, ombre hachurée, trait hésitant ; chaque variante est un sprite mis en cache.
+ */
+import { nb4, type Cell } from '../core/hex';
 import { INK } from '../data/palette';
 import { A } from '../app/state';
 import { pick3, sh, sprite } from './kit';
 import { LD, softShadow } from './terrain';
+import type { Pt, Rand, Sprite } from './types';
+import { TER } from '../world/terrain';
 
-function smoothPts(pts) {
+/** Options d'une masse arrondie : nombre de points, irrégularité, hachures, reflets, épaisseur du trait. */
+interface MassOpts {
+  n?: number;
+  v?: number;
+  hatch?: number;
+  ticks?: number;
+  w?: number;
+}
+
+/** Contour lissé (courbes de Bézier entre les milieux des côtés). */
+function smoothPts(pts: Pt[]): Pt[] {
   const n = pts.length,
-    o = [];
+    o: Pt[] = [];
   for (let k = 0; k < n; k++) {
     const p = pts[(k + n - 1) % n],
       c = pts[k],
       q = pts[(k + 1) % n];
-    const a = [(p[0] + c[0]) / 2, (p[1] + c[1]) / 2],
-      b = [(c[0] + q[0]) / 2, (c[1] + q[1]) / 2];
+    const a: Pt = [(p[0] + c[0]) / 2, (p[1] + c[1]) / 2],
+      b: Pt = [(c[0] + q[0]) / 2, (c[1] + q[1]) / 2];
     for (let t = 0; t < 1; t += 1 / 6) {
       const u = 1 - t;
       o.push([u * u * a[0] + 2 * u * t * c[0] + t * t * b[0], u * u * a[1] + 2 * u * t * c[1] + t * t * b[1]]);
@@ -21,17 +36,18 @@ function smoothPts(pts) {
   }
   return o;
 }
-function pathPts(sp, closed) {
+function pathPts(sp: Pt[], closed: boolean): void {
   A.g.beginPath();
   A.g.moveTo(sp[0][0], sp[0][1]);
   for (let k = 1; k < sp.length; k++) A.g.lineTo(sp[k][0], sp[k][1]);
   if (closed) A.g.closePath();
 }
-function roundPath(pts) {
+function roundPath(pts: Pt[]): void {
   pathPts(smoothPts(pts), true);
 }
-function irregular(x, y, rx, ry, n, rnd, var_) {
-  const o = [];
+/** Ellipse irrégulière de n points ; var_ règle l'irrégularité du rayon. */
+function irregular(x: number, y: number, rx: number, ry: number, n: number, rnd: Rand, var_?: number): Pt[] {
+  const o: Pt[] = [];
   const v = var_ ?? 0.22;
   for (let k = 0; k < n; k++) {
     const a = (k / n) * Math.PI * 2 + (rnd() - 0.5) * 0.4,
@@ -41,7 +57,7 @@ function irregular(x, y, rx, ry, n, rnd, var_) {
   return o;
 }
 /* trait hésitant : épaisseur qui varie, léger tremblé, quelques reprises */
-function pencil(sp, closed, w, rnd, col, alpha) {
+function pencil(sp: Pt[], closed: boolean, w: number, rnd: Rand, col?: string, alpha?: number): void {
   const n = sp.length,
     m = closed ? n : n - 1;
   A.g.lineCap = 'round';
@@ -64,7 +80,8 @@ function pencil(sp, closed, w, rnd, col, alpha) {
   }
   A.g.globalAlpha = 1;
 }
-function hatchIn(cx, cy, rx, ry, rnd, col, n, len) {
+/** Hachures courbes dans une ellipse, pour l'ombre propre d'un volume. */
+function hatchIn(cx: number, cy: number, rx: number, ry: number, rnd: Rand, col: string, n: number, len: number): void {
   A.g.strokeStyle = col;
   A.g.lineCap = 'round';
   for (let k = 0; k < n; k++) {
@@ -81,8 +98,8 @@ function hatchIn(cx, cy, rx, ry, rnd, col, n, len) {
   }
   A.g.globalAlpha = 1;
 }
-function mass(x, y, rx, ry, base, rnd, opt) {
-  opt = opt || {};
+/** Volume arrondi : remplissage, lumière en haut à gauche, ombre en bas à droite, hachures, trait. */
+function mass(x: number, y: number, rx: number, ry: number, base: string, rnd: Rand, opt: MassOpts = {}): Pt[] {
   const pts = irregular(x, y, rx, ry, opt.n || 8, rnd, opt.v),
     sp = smoothPts(pts);
   pathPts(sp, true);
@@ -117,8 +134,9 @@ function mass(x, y, rx, ry, base, rnd, opt) {
   pencil(sp, true, opt.w || 1.1, rnd);
   return sp;
 }
-function trunk2(x, y, w, h, lean, col, rnd) {
-  const pts = [
+/** Tronc qui s'affine, penché de lean. */
+function trunk2(x: number, y: number, w: number, h: number, lean: number, col: string, rnd: Rand): void {
+  const pts: Pt[] = [
     [x - w, y],
     [x - w * 0.55 + lean * 0.35, y - h * 0.5],
     [x - w * 0.4 + lean, y - h],
@@ -142,23 +160,25 @@ function trunk2(x, y, w, h, lean, col, rnd) {
   A.g.quadraticCurveTo(pts[4][0], pts[4][1], pts[5][0], pts[5][1]);
   A.g.closePath();
   A.g.fill();
-  const L = [];
+  const L: Pt[] = [];
   for (let t = 0; t <= 1; t += 0.2) L.push([x - w + (w * 0.6 + lean) * t, y - h * t]);
   pencil(L, false, 0.9, rnd);
-  const R2 = [];
+  const R2: Pt[] = [];
   for (let t = 0; t <= 1; t += 0.2) R2.push([x + w + (-w * 0.6 + lean) * t, y - h * t]);
   pencil(R2, false, 0.9, rnd);
 }
-function contact(x, y, s) {
+/** Ombre de contact, pour qu'un objet sorte du sol au lieu d'y être posé. */
+function contact(x: number, y: number, s: number): void {
   A.g.fillStyle = 'rgba(22,26,20,.42)';
   A.g.beginPath();
   A.g.ellipse(x + 1.5 * s, y + 0.5 * s, 6 * s, 2 * s, 0, 0, 7);
   A.g.fill();
 }
-function tuft(x, y, s, col, rnd) {
-  const sp = mass(x, y - 1.5 * s, 4 * s, 2.4 * s, col, rnd, { n: 6, hatch: 2, w: 0.8, v: 0.3 });
+function tuft(x: number, y: number, s: number, col: string, rnd: Rand): void {
+  mass(x, y - 1.5 * s, 4 * s, 2.4 * s, col, rnd, { n: 6, hatch: 2, w: 0.8, v: 0.3 });
 }
-function oak3(x, y, s, rnd, tone) {
+/** Chêne : tronc et trois masses de feuillage. */
+function oak3(x: number, y: number, s: number, rnd: Rand, tone?: string): void {
   const c = tone || '#3f5338';
   softShadow(x + 7 * s, y + 1, 14 * s, 5 * s);
   contact(x, y, s);
@@ -169,7 +189,8 @@ function oak3(x, y, s, rnd, tone) {
   for (let k = 0; k < 3; k++)
     tuft(x + (k - 1) * 4 * s + (rnd() - 0.5) * s, y + 1.2 * s, s * 0.8, pick3(rnd, ['#56704a', '#4c6340', '#6a8458']), rnd);
 }
-function pine3(x, y, s, rnd) {
+/** Pin maritime penché par le vent, près des côtes. */
+function pine3(x: number, y: number, s: number, rnd: Rand): void {
   softShadow(x + 9 * s, y + 1, 12 * s, 4 * s);
   contact(x, y, s);
   const lean = (6 + rnd() * 5) * s;
@@ -180,7 +201,7 @@ function pine3(x, y, s, rnd) {
   A.g.moveTo(x, y);
   A.g.quadraticCurveTo(x + lean * 0.2, y - 15 * s, x + lean, y - 30 * s);
   A.g.stroke();
-  const L = [];
+  const L: Pt[] = [];
   for (let t = 0; t <= 1; t += 0.25) {
     const u = 1 - t;
     L.push([
@@ -193,7 +214,8 @@ function pine3(x, y, s, rnd) {
   mass(x + lean + 5 * s, y - 36 * s, 8 * s, 3.6 * s, '#3a4f3e', rnd, { n: 8, v: 0.3, hatch: 3, ticks: 3 });
   for (let k = 0; k < 2; k++) tuft(x + (k - 0.5) * 5 * s, y + 1.2 * s, s * 0.8, pick3(rnd, ['#6a5a46', '#7d5f80', '#56704a']), rnd);
 }
-function boulder3(x, y, s, rnd, base) {
+/** Bloc de granit arrondi, tacheté de lichen. */
+function boulder3(x: number, y: number, s: number, rnd: Rand, base?: string): void {
   const b = base || '#b49c95';
   softShadow(x + 5 * s, y + 1, 11 * s, 4 * s);
   contact(x, y, s * 1.4);
@@ -205,14 +227,15 @@ function boulder3(x, y, s, rnd, base) {
     A.g.fill();
   }
 }
-function slab3(x, y, s, rnd) {
+/** Dalle de pierre basculée. */
+function slab3(x: number, y: number, s: number, rnd: Rand): void {
   softShadow(x + 4 * s, y + 1, 12 * s, 4 * s);
   contact(x, y, s * 1.4);
   const w = 11 * s,
     d = 4 * s,
     h = (3 + rnd() * 4) * s,
     t = (rnd() - 0.3) * 5 * s;
-  const side = [
+  const side: Pt[] = [
       [x - w, y - h + t],
       [x - w * 0.1, y - h + d * 0.6],
       [x + w, y - h - d * 0.6 - t],
@@ -220,7 +243,7 @@ function slab3(x, y, s, rnd) {
       [x - w * 0.1, y + d * 0.4],
       [x - w, y],
     ],
-    top = [
+    top: Pt[] = [
       [x - w, y - h + t],
       [x + w * 0.2, y - h - d - t * 0.3],
       [x + w, y - h - d * 0.6 - t],
@@ -236,10 +259,11 @@ function slab3(x, y, s, rnd) {
   A.g.fill();
   pencil(smoothPts(top), true, 0.9, rnd);
 }
-function needle3(x, y, h, rnd) {
+/** Aiguille rocheuse de hauteur h. */
+function needle3(x: number, y: number, h: number, rnd: Rand): void {
   softShadow(x + 6, y + 1, 10, 3.5);
   contact(x, y, 1.5);
-  const pts = [
+  const pts: Pt[] = [
     [x - 7, y],
     [x - 5, y - h * 0.55],
     [x - 1, y - h],
@@ -266,7 +290,7 @@ function needle3(x, y, h, rnd) {
   pencil(sp, true, 1.2, rnd);
 }
 /* le tapis : sous-bois, aiguilles, éboulis ou herbe, qui couvre l'essentiel de la case */
-function carpet(rnd, cols, clumps) {
+function carpet(rnd: Rand, cols: string[], clumps: number): void {
   const pts = irregular(0, 0, 27, 17, 14, rnd, 0.18),
     sp = smoothPts(pts);
   pathPts(sp, true);
@@ -287,33 +311,36 @@ function carpet(rnd, cols, clumps) {
   A.g.restore();
   pencil(sp, true, 0.8, rnd, INK, 0.45);
 }
-function spotsIn(n, rx, ry, rnd) {
-  const o = [];
+/** Jusqu'à n emplacements dans une ellipse, assez espacés, triés d'arrière en avant. */
+function spotsIn(n: number, rx: number, ry: number, rnd: Rand): Pt[] {
+  const o: Pt[] = [];
   let tries = 0;
   while (o.length < n && tries < 200) {
     tries++;
     const a = rnd() * Math.PI * 2,
       d = Math.sqrt(rnd());
-    const p = [Math.cos(a) * rx * d, Math.sin(a) * ry * d];
+    const p: Pt = [Math.cos(a) * rx * d, Math.sin(a) * ry * d];
     if (o.every(q => Math.hypot((q[0] - p[0]) / 1.6, q[1] - p[1]) > 5.5)) o.push(p);
   }
   return o.sort((a, b) => a[1] - b[1]);
 }
-function treeCtx(i) {
+/** Variante de forêt selon le voisinage : p pins (près des côtes) ou f feuillus, d dense ou e clairsemée. */
+function treeCtx(i: Cell): string {
   let nf = 0;
-  for (const j of nb4(i)) if (A.S.ter[j] === 1) nf++;
+  for (const j of nb4(i)) if (A.S.ter[j] === TER.forest) nf++;
   return ((LD[i] || 9) <= 3 ? 'p' : 'f') + (nf >= 5 ? 'd' : 'e');
 }
-function rockCtx(i) {
+/** Variante de rochers : rc aiguille sur un sommet, ra amas, rb dalles isolées. */
+function rockCtx(i: Cell): string {
   let nr = 0,
     hi = true;
   for (const j of nb4(i)) {
-    if (A.S.ter[j] === 3) nr++;
+    if (A.S.ter[j] === TER.rocks) nr++;
     if (A.S.hgt && A.S.hgt[j] > A.S.hgt[i]) hi = false;
   }
   return nr >= 5 ? (hi && i % 4 === 0 ? 'rc' : 'ra') : 'rb';
 }
-function treeSpr2(c, v) {
+function treeSpr2(c: string, v: number): Sprite {
   return sprite('T3' + c + v, -64, -112, 64, 34, rnd => {
     const dense = c[1] === 'd',
       pine = c[0] === 'p';
@@ -326,7 +353,7 @@ function treeSpr2(c, v) {
           : ['#3e4c38', '#4a5a42', '#7d5f80', '#d4b23c'],
       dense ? 14 : 10,
     );
-    const pts = [],
+    const pts: (Pt | [number, number, 's'])[] = [],
       rows = dense ? [-12, -6, 0, 6, 12] : [-10, -3, 4, 11];
     for (const y of rows) {
       const half = Math.sqrt(Math.max(0, 1 - (y / 16) ** 2)) * 24,
@@ -337,7 +364,7 @@ function treeSpr2(c, v) {
         pts.push([x, y + (rnd() - 0.5) * 2.5]);
       }
     }
-    if (!dense) for (const p of spotsIn(3, 22, 13, rnd)) p.push('s'), pts.push(p);
+    if (!dense) for (const p of spotsIn(3, 22, 13, rnd)) pts.push([p[0], p[1], 's']);
     pts.sort((a, b) => a[1] - b[1]);
     for (const p of pts) {
       if (p[2] === 's') {
@@ -350,7 +377,7 @@ function treeSpr2(c, v) {
     }
   });
 }
-function rockSpr2(c, v) {
+function rockSpr2(c: string, v: number): Sprite {
   return sprite('R2' + c + v, -56, -86, 56, 30, rnd => {
     if (c === 'ra') {
       carpet(rnd, ['#8d817c', '#9a8e88', '#7d736e', '#6a8458'], 12);
@@ -366,7 +393,8 @@ function rockSpr2(c, v) {
     }
   });
 }
-function loneOak(v) {
+/** Chêne isolé sur une touffe d'herbe, semé çà et là dans la prairie. */
+function loneOak(v: number): Sprite {
   return sprite('LO2' + v, -54, -86, 54, 26, rnd => {
     const pts = irregular(2, 2, 15, 8, 10, rnd, 0.2),
       sp = smoothPts(pts);
@@ -377,7 +405,8 @@ function loneOak(v) {
     oak3(0, 4, 1.35 + rnd() * 0.2, rnd, '#3e5238');
   });
 }
-function decoSpr(t) {
+/** Site ancien : 1 grand menhir, 2 dolmen, 3 chêne des anciens. */
+function decoSpr(t: number): Sprite {
   return sprite('D2' + t, -70, -150, 70, 34, rnd => {
     carpet(rnd, t === 2 ? ['#7f7a66', '#8e6c8f', '#7d5f80', '#d4b23c'] : ['#6a8458', '#7b9467', '#5d7a4a', '#8e6c8f'], 12);
     if (t === 1) {
@@ -386,7 +415,7 @@ function decoSpr(t) {
         boulder3(Math.cos(a) * 24, Math.sin(a) * 12 + 2, 0.36, rnd);
       }
       const h = 96,
-        pts = [
+        pts: Pt[] = [
           [-11, 4],
           [-12, -h * 0.5],
           [-7, -h * 0.92],
@@ -434,7 +463,7 @@ function decoSpr(t) {
         [-22, -4, 22],
         [18, -6, 24],
       ]) {
-        const pts = [
+        const pts: Pt[] = [
           [x - 5, y],
           [x - 5, y - h],
           [x + 5, y - h - 2],
@@ -454,7 +483,7 @@ function decoSpr(t) {
         [-14, 8, 20],
         [16, 8, 21],
       ]) {
-        const pts = [
+        const pts: Pt[] = [
           [x - 5, y],
           [x - 5, y - h],
           [x + 5, y - h - 2],
@@ -467,7 +496,7 @@ function decoSpr(t) {
         hatchIn(x + 2, y - h * 0.5, 4, h * 0.4, rnd, INK, 5, 4);
         pencil(sp, true, 1, rnd);
       }
-      const top = [
+      const top: Pt[] = [
           [-34, -24],
           [-6, -34],
           [32, -30],

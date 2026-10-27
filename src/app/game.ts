@@ -1,27 +1,22 @@
-// @ts-nocheck — à typer (en cours).
+/**
+ * La partie en cours, vue de l'interface : création, chronique, messages, actions du joueur et sauvegarde.
+ * Ce module relie la simulation (qui ne connaît ni l'écran ni la page) au reste du jeu, à travers CTX.
+ */
 import { nextRandom } from '../core/rng';
 import { deserialize, serialize } from '../core/save';
 import { localStore } from '../core/storage';
-import { HX, HY, foot, hexLine, idx } from '../core/hex';
+import { HX, HY, foot, hexLine, idx, type Cell } from '../core/hex';
+import type { Building, House } from '../core/state';
 import { generateWorld } from '../world/generate';
-import { access as accessOf, buildings, monumentDone, nearTerrain, tilesOf as tilesOfB } from '../sim/query';
+import { access as accessOf, buildings } from '../sim/query';
 import { assignLabor } from '../sim/labor';
-import { needsOf } from '../sim/housing';
-import { putAny as putAnyS, stockOf as stockOfS, take as takeS } from '../sim/stock';
-import { roadNb as roadNbS, roadSearch } from '../sim/paths';
-import { killWalker } from '../sim/walkers';
-import {
-  buildWall as buildWallS,
-  passE as passES,
-  resetFields,
-  spawnUnit as spawnUnitS,
-  startRaid as startRaidS,
-  stepUnits as stepUnitsS,
-} from '../sim/defense';
-import { progress } from '../sim/monuments';
+import { needsOf, type HouseNeeds, type HouseStock } from '../sim/housing';
+import { stockOf as stockOfS } from '../sim/stock';
+import { roadNb as roadNbS } from '../sim/paths';
+import { buildWall as buildWallS, resetFields } from '../sim/defense';
 import { dateLabel, simStep } from '../sim/tick';
-import { buildingStep } from '../sim/buildings';
 import { OBJECTIVES } from '../sim/objectives';
+import type { SimCtx } from '../sim/context';
 import {
   buildRoad as buildRoadS,
   canPlace as canPlaceS,
@@ -31,32 +26,50 @@ import {
   removeBuilding,
   roadCost as roadCostS,
 } from '../sim/construction';
-import { monthlyTaxDue, taxRate as taxRateOf } from '../sim/tax';
+import { monthlyTaxDue } from '../sim/tax';
 import { A } from './state';
 import { $ } from './dom';
 import { W } from '../render/projection';
 import { computeDep } from '../render/terrain';
 import { markVis, resetVis } from '../render/overlays';
-import { FX } from '../render/fx';
+import { FX, ageFX } from '../render/fx';
 
-let toastT = 0;
+/** Nombre d'entrées gardées dans la chronique. */
+const LOG_SIZE = 14;
 
-const ENTRY = () => (A.S && A.S.entry != null ? A.S.entry : idx(0, 24));
-/* hasard de la simulation : tiré de l'état de la partie, donc reproductible et sauvegardé avec elle */
-const R = () => {
+export const store = localStore('oppidum-save', ['oppidum-v2']);
+
+/** Hasard de la simulation : tiré de l'état de la partie, donc reproductible et sauvegardé avec elle. */
+function rand(): number {
   const [v, n] = nextRandom(A.S.rs | 0);
   A.S.rs = n;
   return v;
+}
+
+/** Ce que la simulation demande au jeu : hasard, chronique, messages, effets, retrait d'un bâtiment. */
+const CTX: SimCtx = {
+  rand,
+  log: m => log(m),
+  toast: m => toast(m),
+  fx: e => FX.push(e),
+  removeBuilding: id => removeB(id),
+  onVisit: w => markVis(w),
 };
-const store = localStore('oppidum-save', ['oppidum-v2']);
-/* ---------- carte ---------- */
-function newGame(seed) {
-  const wd = generateWorld(seed);
-  A.S = createGame(seed, wd);
+
+/** Remet à zéro tout ce qui dépend de la partie sans être sauvegardé : distances, effets, passages, profondeur de la mer. */
+function resetCaches(): void {
   resetFields();
   FX.length = 0;
   resetVis();
   computeDep();
+}
+
+/* ---------- partie ---------- */
+
+export function newGame(seed: number): void {
+  const wd = generateWorld(seed);
+  A.S = createGame(seed, wd);
+  resetCaches();
   log(
     "Votre clan vénète vient de débarquer sur l'île. Prolongez la route qui part du port, posez des huttes de part et d'autre et un puits.",
   );
@@ -65,190 +78,116 @@ function newGame(seed) {
   A.cam.y = cy;
   A.cam.z = 1.1;
 }
-/* ---------- utilitaires ---------- */
-function log(t) {
-  A.S.logs.unshift({ m: dateTxt(), t });
-  if (A.S.logs.length > 14) A.S.logs.length = 14;
-  A.dirtyLog = true;
-}
-function dateTxt() {
-  return dateLabel(A.S.mi);
-}
-function toast(t) {
-  const el = $('toast');
-  el.textContent = t;
-  el.classList.add('on');
-  clearTimeout(toastT);
-  toastT = setTimeout(() => el.classList.remove('on'), 2200);
-}
-function blds() {
-  return buildings(A.S);
-}
-const tilesOf = tilesOfB;
-function roadNb(i) {
-  return roadNbS(A.S, i);
-}
-function access(b) {
-  return accessOf(A.S, b);
-}
-function bfs(start, goal) {
-  return roadSearch(A.S, start, goal);
-}
-function stockOf(r) {
-  return stockOfS(A.S, r);
-}
-function take(r, n) {
-  return takeS(A.S, r, n);
-}
-function putAny(r, n) {
-  putAnyS(A.S, r, n);
-}
-function nearTer(b, t, r) {
-  return nearTerrain(A.S, b, t, r);
-}
-/* ---------- construction ---------- */
-function canPlace(type, x, y) {
-  return canPlaceS(A.S, type, x, y);
-}
-function place(type, x, y) {
-  const b = placeBuilding(A.S, type, x, y, CTX);
-  return !!b;
-}
-function roadCost(i) {
-  return roadCostS(A.S, i);
-}
-function buildRoad(list) {
-  buildRoadS(A.S, list, CTX);
-}
-function demolishRect(a, c) {
-  demolishArea(A.S, a, c, id => removeB(id));
-}
-function removeB(id) {
-  if (removeBuilding(A.S, id) && A.sel === id) A.sel = null;
-}
-/* ---------- marcheurs ---------- */
-function kill(w) {
-  killWalker(A.S, w);
-}
-/* ---------- simulation ---------- */
-function stepSim() {
+
+/** Un pas de simulation, puis le vieillissement des effets visuels. Sauvegarde à chaque fin de mois. */
+export function stepSim(): void {
   simStep(A.S, CTX, {
     onMonth: () => {
       A.dirtyObj = true;
       save();
     },
   });
+  ageFX();
 }
-function updB(b) {
-  buildingStep(A.S, b, CTX);
-}
-function staff() {
+
+/** Répartit les travailleurs (à appeler après un chargement ou une nouvelle partie). */
+export function staff(): void {
   assignLabor(A.S);
 }
-function taxRate() {
-  return taxRateOf(A.S);
+
+/* ---------- chronique et messages ---------- */
+
+export function log(t: string): void {
+  A.S.logs.unshift({ m: dateTxt(), t });
+  if (A.S.logs.length > LOG_SIZE) A.S.logs.length = LOG_SIZE;
+  A.dirtyLog = true;
 }
-function taxDue() {
-  return monthlyTaxDue(A.S);
+
+export function dateTxt(): string {
+  return dateLabel(A.S.mi);
 }
-function hasOf(h) {
-  return needsOf(A.S, h);
+
+let toastT: ReturnType<typeof setTimeout> | undefined;
+/** Message bref en bas de l'écran. */
+function toast(t: string): void {
+  const el = $('toast');
+  el.textContent = t;
+  el.classList.add('on');
+  clearTimeout(toastT);
+  toastT = setTimeout(() => el.classList.remove('on'), 2200);
 }
-const OBJ = OBJECTIVES.map(o => [o.label, () => o.done(A.S), () => o.progress(A.S)]);
+
+/* ---------- lectures pour l'affichage ---------- */
+
+/** Case d'arrivée des familles. */
+export const ENTRY = (): Cell => (A.S && A.S.entry != null ? A.S.entry : idx(0, 24));
+export const blds = (): Building[] => buildings(A.S);
+export const roadNb = (i: Cell): Cell[] => roadNbS(A.S, i);
+export const access = (b: Building): Cell[] => accessOf(A.S, b);
+export const stockOf = (r: string): number => stockOfS(A.S, r);
+export const taxDue = (): number => monthlyTaxDue(A.S);
+export const hasOf = (h: House): HouseNeeds => needsOf(A.S, h as HouseStock);
+export const canPlace = (type: string, x: number, y: number): string => canPlaceS(A.S, type, x, y);
+export const roadCost = (i: Cell): number => roadCostS(A.S, i);
+/** Cases d'une ligne droite entre deux cases, pour tracer chemins et remparts. */
+export const roadLine = hexLine;
+
+/** Objectifs : libellé, atteint ?, avancement affiché. */
+export const OBJ: [string, () => boolean, () => string][] = OBJECTIVES.map(o => [o.label, () => o.done(A.S), () => o.progress(A.S)]);
+
+/* ---------- actions du joueur ---------- */
+
+/** Pose un bâtiment ; renvoie faux si l'emplacement ou le trésor ne le permettent pas. */
+export function place(type: string, x: number, y: number): boolean {
+  return !!placeBuilding(A.S, type, x, y, CTX);
+}
+
+export function buildRoad(list: Cell[]): void {
+  buildRoadS(A.S, list, CTX);
+}
+
+export function buildWall(list: Cell[]): void {
+  buildWallS(A.S, list, CTX);
+}
+
+export function demolishRect(a: Cell, c: Cell): void {
+  demolishArea(A.S, a, c, id => removeB(id));
+}
+
+function removeB(id: number): void {
+  if (removeBuilding(A.S, id) && A.sel === id) A.sel = null;
+}
+
 /* ---------- sauvegarde ---------- */
-function ser() {
+
+export function ser(): string {
   return serialize(A.S, A.cam);
 }
-function load(str) {
+
+export function save(): void {
+  store.write(ser());
+}
+
+/** Reprend une partie sauvegardée ; renvoie faux si la sauvegarde est illisible. */
+export function load(str: string): boolean {
   const r = deserialize(str);
-  if (!r.ok) {
+  if (r.ok === false) {
     console.warn('Sauvegarde ignorée :', r.reason);
     return false;
   }
   const o = r.state;
-  /* relief absent des plus anciennes sauvegardes : on le recalcule depuis la graine, aplani sous les bâtiments */
+  // relief absent des plus anciennes sauvegardes : on le recalcule depuis la graine, aplani sous les bâtiments
   if (r.missing.includes('hgt')) {
     o.hgt = generateWorld(o.seed).hgt;
     for (const b of Object.values(o.b)) {
-      const f = foot(b.s, b.x, b.y) || [];
       const h0 = o.hgt[idx(b.x, b.y)];
-      for (const t of f) o.hgt[t] = h0;
+      for (const t of foot(b.s, b.x, b.y) ?? []) o.hgt[t] = h0;
     }
   }
   A.S = o;
-  computeDep();
-  for (const b of blds())
-    if (b.hp == null) {
-      b.maxhp = b.hp = 40 * b.s * b.s;
-    }
-  resetFields();
-  resetVis();
+  for (const b of blds()) if (b.hp == null) b.maxhp = b.hp = 40 * b.s * b.s;
+  resetCaches();
   if (r.cam) A.cam = r.cam;
   if (r.migratedFrom) log(`Partie reprise depuis une sauvegarde au format ${r.migratedFrom}, mise à jour automatiquement.`);
   return true;
 }
-function save() {
-  store.write(ser());
-}
-/* ce que la simulation demande au jeu : hasard, chronique, effets, retrait d'un bâtiment */
-const CTX = {
-  rand: () => R(),
-  log: m => log(m),
-  toast: m => toast(m),
-  fx: e => FX.push(e),
-  removeBuilding: id => removeB(id),
-  onVisit: w => markVis(w),
-};
-function monDone(t) {
-  return monumentDone(A.S, t);
-}
-function monProg(b) {
-  return progress(b);
-}
-function passE(i) {
-  return passES(A.S, i);
-}
-function spawnUnit(k, i, home) {
-  return spawnUnitS(A.S, k, i, CTX, home);
-}
-function stepUnits() {
-  stepUnitsS(A.S, CTX);
-  for (const f of FX) f.t--;
-  for (let k = FX.length - 1; k >= 0; k--) if (FX[k].t <= 0) FX.splice(k, 1);
-}
-function startRaid() {
-  return startRaidS(A.S, CTX);
-}
-function buildWall(list) {
-  buildWallS(A.S, list, CTX);
-}
-const roadLine = hexLine;
-
-export {
-  ENTRY,
-  OBJ,
-  access,
-  blds,
-  buildRoad,
-  buildWall,
-  canPlace,
-  dateTxt,
-  demolishRect,
-  hasOf,
-  load,
-  log,
-  monProg,
-  newGame,
-  place,
-  roadCost,
-  roadLine,
-  roadNb,
-  save,
-  ser,
-  staff,
-  stepSim,
-  stockOf,
-  store,
-  taxDue,
-  tilesOf,
-};

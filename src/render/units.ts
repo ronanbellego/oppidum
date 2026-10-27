@@ -1,10 +1,13 @@
-// @ts-nocheck — à typer (en cours).
+/** Personnages et navires : marcheurs, porteurs, guerriers et pillards, bateaux, fumées. */
+import type { Unit } from '../core/state';
 import { RES } from '../data/resources';
 import { A } from '../app/state';
 import { W } from './projection';
 import { OUT, P, ln, sh } from './kit';
+import type { Pt } from './types';
 
-function smoke(x, y, z, time, c) {
+/** Volutes de fumée au-dessus d'un point du plan : r claire (brasserie), k noire (forge). */
+function smoke(x: number, y: number, z: number, time: number, c: 'r' | 'k'): void {
   for (let k = 0; k < 4; k++) {
     const ph = (time / 1800 + k / 4) % 1;
     const [px, py] = W(x, y, z + ph * 34);
@@ -14,7 +17,8 @@ function smoke(x, y, z, time, c) {
     A.g.fill();
   }
 }
-function figure(px, py, ph, body, kind) {
+/** Petit personnage à l'écran : ph est la phase de la marche, body la couleur de la tunique, kind son attribut. */
+function figure(px: number, py: number, ph: number, body: string, kind: string): void {
   A.g.fillStyle = 'rgba(0,0,0,.28)';
   A.g.beginPath();
   A.g.ellipse(px + 1.5, py, 4.5, 1.8, 0, 0, 7);
@@ -88,7 +92,8 @@ function figure(px, py, ph, body, kind) {
     ln([px - 5, py - 13], [px + 2, py - 11], '#5a3a1e', 0.8);
   }
 }
-function cartFig(px, py, ph, res) {
+/** Porteur poussant sa charrette, chargée de la ressource res. */
+function cartFig(px: number, py: number, ph: number, res: string): void {
   A.g.fillStyle = 'rgba(0,0,0,.28)';
   A.g.beginPath();
   A.g.ellipse(px + 6, py, 9, 2.4, 0, 0, 7);
@@ -116,7 +121,8 @@ function cartFig(px, py, ph, res) {
   ln([px + 1, py - 7], [px - 2, py - 8], '#5a3a1e', 1);
   figure(px - 4, py, ph, '#7b5a38', 'cart');
 }
-function unitFig(u, px, py, ph) {
+/** Guerrier du clan ou pillard, avec sa barre de vie s'il est blessé. */
+function unitFig(u: Unit, px: number, py: number, ph: number): void {
   const en = u.k === 'enemy';
   figure(px, py, ph, en ? '#5d6b3c' : '#3f66a3', 'soldier');
   if (en) {
@@ -153,14 +159,15 @@ function unitFig(u, px, py, ph) {
     A.g.fillRect(px - 6, py - 29, 12 * Math.max(0, u.hp / u.max), 2.6);
   }
 }
-function shipFig(px, py, s, hull, sail, time, ph) {
+/** Navire à voile carrée qui tangue : s échelle, ph décalage de la houle. */
+function shipFig(px: number, py: number, s: number, hull: string, sail: string, time: number, ph: number): void {
   const b = Math.sin(time / 700 + ph) * 1.6;
   py += b;
   A.g.fillStyle = 'rgba(20,36,46,.35)';
   A.g.beginPath();
   A.g.ellipse(px + 3 * s, py + 3 * s, 26 * s, 6 * s, 0, 0, 7);
   A.g.fill();
-  const H = [
+  const H: Pt[] = [
     [px - 24 * s, py - 12 * s],
     [px - 18 * s, py - 2 * s],
     [px + 16 * s, py - 2 * s],
