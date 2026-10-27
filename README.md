@@ -120,3 +120,39 @@ L'ordre des tirages au hasard dans `world/generate.ts` fixe la forme des îles :
 1. typer `render/` et `ui/` module par module, en retirant les `@ts-nocheck` ;
 2. réduire l'objet partagé `app/state.ts` : chaque cache rejoint le module qui l'utilise ;
 3. passer progressivement en TypeScript strict.
+
+## Rendu visuel
+
+### Comment il est fait aujourd'hui
+
+Tout est dessiné par le code, en Canvas 2D, sans aucun fichier image. Le terrain est peint en facettes une fois par blocs de 12 × 12 hexagones, puis recopié tant que rien ne change (`render/terrain.ts`). Arbres, rochers, bâtiments et personnages sont dessinés en polygones, entourés d'un contour au crayon et mis en cache sous forme de petites images (`render/kit.ts`). À chaque image, `render/renderer.ts` recopie les blocs de terrain, trie les objets par profondeur, les pose, puis ajoute les nuages et un calque de teinte.
+
+Les captures de référence de cet état sont dans `docs/rendu/` (graine 20260, village simulé pendant 30 mois) : la côte au départ, le village au zoom 1 et au zoom maximal 2,4.
+
+### Défauts relevés (octobre 2026)
+
+1. **La grille domine l'image.** Chaque case est un hexagone arrondi, rentré de 4,5 % (`INS`) sur une sous-couche sombre, si bien qu'un joint apparaît même entre deux cases de prairie. Le sol ressemble à un dallage plutôt qu'à un paysage. Les facettes partent toutes du centre de la case : chaque hexagone forme une petite pyramide, ce qui se voit surtout sur les plages et en mer.
+2. **Deux styles cohabitent.** Le terrain est en facettes sans contour, alors que les arbres, les rochers, les bâtiments et les personnages ont un trait sombre et un dessin d'illustration. L'œil lit deux jeux posés l'un sur l'autre.
+3. **Les échelles ne s'accordent pas.** Un habitant fait la moitié de la hauteur d'une hutte, un arbre de forêt dépasse une maison, le grand menhir est plus haut que les tours de guet et les rochers ont la taille des huttes.
+4. **Les couleurs sont ternes.** La palette du terrain (`data/palette.ts`) est grise et peu saturée, la lande gris-brun est semée de points violets et jaunes qui font l'effet de confettis, et un calque bleuté appliqué en multiplication sur toute la scène refroidit encore l'ensemble.
+5. **Les bâtiments ne projettent pas d'ombre au sol** (seuls les arbres, les rochers et le menhir en ont une) et reposent sur des aplats beiges qui reprennent exactement le contour des cases.
+6. **Le décor se répète.** Trois ou quatre variantes par élément, des forêts faites de bosquets identiques en masse compacte, des champs de blé qui épousent chaque hexagone.
+7. **Les chemins paraissent plaqués** : bandes grises uniformes tracées de centre à centre, avec un nœud hexagonal à chaque case, des tracés en zigzag et une couleur proche de celle de la pierre.
+8. **Le terrain devient flou quand on zoome.** Les blocs sont peints à 1,3 fois la résolution (1,6 sur écran haute densité) et les petites images à 2 ou 3 fois, alors que le zoom monte jusqu'à 2,4. Au-delà d'un zoom de 1,3 environ, le sol perd sa netteté, et plus encore sur un écran Retina.
+
+### Démarche d'amélioration
+
+1. **Constituer un moodboard** : jeux de référence (Townscaper, Islanders, Bad North, Dorfromantik pour la grille hexagonale, Northgard pour l'ambiance), photos de la côte morbihannaise, reconstitutions archéologiques de maisons gauloises, couleurs des landes et des marais.
+2. **Rédiger une courte bible visuelle** : palette limitée (une douzaine de couleurs), direction du soleil, angle de vue, échelle d'un habitant par rapport à une maison, présence ou non d'un contour, niveau de détail admis. Elle se traduit directement en constantes dans `data/palette.ts` et `render/projection.ts`.
+3. **Faire un test comparatif sur une seule scène** : une tuile de terrain, une maison, un bout de côte, réalisés selon deux voies, puis comparés côte à côte en situation de jeu, à partir des captures de `docs/rendu/`.
+4. **Choisir la voie et produire en série** à partir de la bible, en vérifiant la cohérence sur une vue d'ensemble de la cité plutôt que bâtiment par bâtiment.
+5. **Finir par l'ambiance** : post-traitement, brume, goélands, animation de l'eau. Cette dernière couche donne beaucoup de vie, mais elle ne rattrape pas une base incohérente.
+
+Les voies possibles, de la moins à la plus coûteuse :
+
+- **A. Améliorer le dessin par code** : terrain continu sans joint entre cases identiques, éclairage calculé à partir d'un soleil unique pour toutes les faces, palette resserrée, ombres portées, variations de taille et de teinte, peinture des blocs à la résolution réelle de l'écran. Passer à PixiJS (WebGL) apporterait l'anticrénelage et des filtres de post-traitement.
+- **B. Passer à une vraie 3D low-poly avec Three.js** : caméra orthographique en vue isométrique, ombrage plat, lumière, ombres et cycle jour-nuit gérés par le moteur. C'est la voie la plus naturelle pour un style en facettes.
+- **C. Pré-rendre des modèles 3D en images** : modélisation et éclairage dans Blender (éventuellement à partir de modèles générés par Meshy, Tripo ou Hunyuan3D), export en atlas PNG. Le jeu reste en 2D, avec une cohérence visuelle excellente.
+- **D. Générer des images 2D par IA** : rapide pour l'exploration, difficile à rendre cohérent sans un modèle entraîné sur le style du jeu (Scenario, par exemple). Vérifier les droits d'usage commercial de chaque outil.
+
+Premières corrections, faisables dans la voie A sans rien jeter : supprimer les joints entre cases de même terrain, peindre les blocs à la résolution `zoom × devicePixelRatio`, donner une ombre portée aux bâtiments, choisir entre contour et absence de contour pour tout le monde, corriger les échelles, puis retravailler la palette.
