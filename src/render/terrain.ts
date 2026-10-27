@@ -5,7 +5,7 @@ import { landDistance, seaDepth } from '../world/terrain';
 import { DEEP, SEA, TCOL, VEG } from '../data/palette';
 import { A } from '../app/state';
 import { DPi, STEP, VISK, W, ZH, ZW, fshade, hexPts, vis } from './projection';
-import { P, blur, canPaint, gem, levelFor, pick3, sh, sprite } from './kit';
+import { P, blur, canPaint, gem, gtri, levelFor, pick3, sh, sprite } from './kit';
 
 function computeDep() {
   A.LD = landDistance(A.S.ter);
@@ -103,7 +103,7 @@ function triShade(a, b, c) {
   const nn = Math.hypot(...n) || 1;
   return (n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2]) / nn - FLAT;
 }
-const RT = 0.15;
+const RT = 0.28;
 /*
  * Une case de terre : un anneau de sommets (coins et milieux d'arêtes) relié à un centre.
  * Les sommets partagés avec une case de terre voisine ont la même position, la même hauteur et la même couleur
@@ -138,7 +138,14 @@ function geoTile(i) {
         zn = zs[(k + 1) % 6];
       const a = [c[0] + (p[0] - c[0]) * RT, c[1] + (p[1] - c[1]) * RT, zs[k] + (zp - zs[k]) * RT],
         b = [c[0] + (n[0] - c[0]) * RT, c[1] + (n[1] - c[1]) * RT, zs[k] + (zn - zs[k]) * RT];
-      ring.push({ p: a, c: cc }, { p: [0.25 * a[0] + 0.5 * c[0] + 0.25 * b[0], 0.25 * a[1] + 0.5 * c[1] + 0.25 * b[1], 0.25 * a[2] + 0.5 * zs[k] + 0.25 * b[2]], c: cc }, { p: b, c: cc });
+      // courbe de Bézier du point a au point b, avec le coin pour point de contrôle
+      for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+        const u = 1 - t;
+        ring.push({
+          p: [u * u * a[0] + 2 * u * t * c[0] + t * t * b[0], u * u * a[1] + 2 * u * t * c[1] + t * t * b[1], u * u * a[2] + 2 * u * t * zs[k] + t * t * b[2]],
+          c: cc,
+        });
+      }
     }
     // milieu de l'arête k (entre les coins k et k+1), partagé avec la case voisine
     const j = nbDir(i, EDGE_DIR[k]),
@@ -156,14 +163,20 @@ function geoTile(i) {
   const coast = nb4(i).some(isWet),
     zc = (coast ? Math.min(ZH(i), zs.reduce((a, b) => a + b, 0) / 6 + 2) : ZH(i)) + (hv(cx, cy, 4) - 0.5) * 2,
     ctr = [cx + (hv(cx, cy, 5) - 0.5) * 0.08, cy + (hv(cx, cy, 6) - 0.5) * 0.08, zc];
+  /*
+   * Triangles en éventail autour du centre. On garde pour chaque sommet une clé de position : l'éclairage
+   * d'un sommet est la moyenne de celui des triangles qui le touchent, dans cette case et ses voisines,
+   * puis la couleur se fond d'un sommet à l'autre. Plus d'arête vive entre deux facettes.
+   */
   const tris = [];
-  const L = ring.length;
+  const L = ring.length,
+    vk = p => Math.round(p[0] * 400) + ',' + Math.round(p[1] * 400),
+    C = { k: 'c' + i, g: ctr, s: W(ctr[0], ctr[1], ctr[2]), c: own };
+  const V = ring.map(r => ({ k: vk(r.p), g: r.p, s: W(r.p[0], r.p[1], r.p[2]), c: r.c }));
   for (let s = 0; s < L; s++) {
-    const p = ring[s],
-      q = ring[(s + 1) % L];
-    const d = triShade(ctr, p.p, q.p);
-    const f = Math.max(0.78, Math.min(1.16, 1 + 1.25 * d)) * (1 + (hv((p.p[0] + q.p[0] + cx) / 3, (p.p[1] + q.p[1] + cy) / 3, 7) - 0.5) * 0.05) * (1 + 0.012 * (zc / STEP));
-    tris.push([[W(ctr[0], ctr[1], ctr[2]), W(p.p[0], p.p[1], p.p[2]), W(q.p[0], q.p[1], q.p[2])], css(avg3(own, p.c, q.c), f)]);
+    const p = V[s],
+      q = V[(s + 1) % L];
+    tris.push({ v: [C, p, q], d: triShade(ctr, p.g, q.g) });
   }
   // falaises : sous le bord des terres hautes qui tombent dans la mer, ou au bout de la carte
   const bot = [0, 1, 2, 3, 4, 5].map(e => {
@@ -213,7 +226,9 @@ function geoTile(i) {
       tq = W(q[0], q[1], q[2]),
       bq = W(q[0], q[1], zb),
       bp = W(p[0], p[1], zb);
-    cliffs.push([[tp, tq, bq], sh(col, f * (1 + v))], [[tp, bq, bp], sh(col, f * (0.95 - v))]);
+    const top = rgb(col).map(x => x * f * (1.06 + v)),
+      low = rgb(col).map(x => x * f * 0.8);
+    cliffs.push([tp, tq, bq, top, top, low], [tp, bq, bp, top, low, low]);
   }
   return { wet: false, zc, zs, tris, cliffs, kind: kindOf(i) };
 }
@@ -222,8 +237,41 @@ function geo(i) {
     A.GEO = [];
     A.GEOS = A.S;
     A.GEOV = A.S.hver || 0;
+    A.VN = new Map();
+    A.VNT = new Set();
   }
   return A.GEO[i] || (A.GEO[i] = geoTile(i));
+}
+/* éclairage moyen des sommets : chaque case verse l'éclairage de ses triangles à leurs trois sommets, une seule fois */
+function lightTile(i) {
+  if (i < 0 || A.VNT.has(i)) return;
+  A.VNT.add(i);
+  const G = geo(i);
+  for (const t of G.tris)
+    for (const v of t.v) {
+      const e = A.VN.get(v.k);
+      if (e) {
+        e[0] += t.d;
+        e[1]++;
+      } else A.VN.set(v.k, [t.d, 1]);
+    }
+}
+function vertexColor(v) {
+  const e = A.VN.get(v.k),
+    d = e ? e[0] / e[1] : 0,
+    f = Math.max(0.8, Math.min(1.14, 1 + 1.25 * d)) * (1 + 0.012 * (v.g[2] / STEP)) * (1 + (hv(v.g[0], v.g[1], 7) - 0.5) * 0.035);
+  return [v.c[0] * f, v.c[1] * f, v.c[2] * f];
+}
+function paintLand(i) {
+  geo(i);
+  lightTile(i);
+  for (const j of nb4(i)) lightTile(j);
+  const G = geo(i);
+  for (const t of G.tris) {
+    const [a, b, c] = t.v;
+    gtri(a.s, b.s, c.s, vertexColor(a), vertexColor(b), vertexColor(c));
+  }
+  for (const [a, b, c, ca, cb, cc] of G.cliffs) gtri(a, b, c, ca, cb, cc);
 }
 
 /* ---------- la mer : un seul tapis de facettes, du turquoise des hauts-fonds au bleu du large ---------- */
@@ -254,15 +302,12 @@ function paintSea(i) {
     pts.push({ p: c, d: (d0 + depthOf(a) + depthOf(b)) / 3 });
     pts.push({ p: [(c[0] + n[0]) / 2, (c[1] + n[1]) / 2], d: (d0 + depthOf(a)) / 2 });
   }
-  const C = W(cx, cy, ZW);
+  const C = W(cx, cy, ZW),
+    c0 = seaRGB(d0);
   for (let s = 0; s < pts.length; s++) {
     const p = pts[s],
       q = pts[(s + 1) % pts.length];
-    const d = (d0 + p.d + q.d) / 3,
-      calm = Math.max(0, 1 - d / 9),
-      n = (hv((p.p[0] + q.p[0] + cx) / 3, (p.p[1] + q.p[1] + cy) / 3, 9) - 0.5) * 0.09 * (0.25 + calm);
-    const col = css(seaRGB(d), 1 + n);
-    P([C, W(p.p[0], p.p[1], ZW), W(q.p[0], q.p[1], ZW)], col, col, 0.6);
+    gtri(C, W(p.p[0], p.p[1], ZW), W(q.p[0], q.p[1], ZW), c0, seaRGB(p.d), seaRGB(q.d));
   }
 }
 
@@ -335,17 +380,29 @@ function roadPath(i) {
       ms.push(W((cx + HX(j)) / 2, (cy + HY(j)) / 2, zm));
     }
   const g = A.g;
+  // au milieu d'une arête, le tracé déborde un peu chez la voisine pour que les deux moitiés se recouvrent
+  const ext = m => {
+    const dx = m[0] - C[0],
+      dy = m[1] - C[1],
+      n = Math.hypot(dx, dy) || 1;
+    return [m[0] + (dx / n) * 1.5, m[1] + (dy / n) * 1.5];
+  };
   g.beginPath();
   if (ms.length === 0) {
     g.moveTo(C[0] - 0.01, C[1]);
     g.lineTo(C[0] + 0.01, C[1]);
   } else if (ms.length === 2) {
-    g.moveTo(ms[0][0], ms[0][1]);
+    const a = ext(ms[0]),
+      b = ext(ms[1]);
+    g.moveTo(a[0], a[1]);
+    g.lineTo(ms[0][0], ms[0][1]);
     g.quadraticCurveTo(C[0], C[1], ms[1][0], ms[1][1]);
+    g.lineTo(b[0], b[1]);
   } else
     for (const m of ms) {
+      const e = ext(m);
       g.moveTo(C[0], C[1]);
-      g.lineTo(m[0], m[1]);
+      g.lineTo(e[0], e[1]);
     }
   return ms.length;
 }
@@ -419,6 +476,70 @@ function chunkBox(ts) {
   }
   return [x0, y0, x1, y1];
 }
+/*
+ * Le sol (mer, terres, falaises) est peint sur une toile à part, avec deux rangs de cases voisines en plus,
+ * puis légèrement flouté pour fondre les facettes et les passages d'un terrain à l'autre. On n'en garde
+ * ensuite que la part de ce bloc (un masque de ses propres cases, élargi d'un pixel) : sur la bordure,
+ * deux blocs voisins portent exactement les mêmes pixels et se raccordent sans couture.
+ */
+const SOFT = 4.5; // rayon du flou, en pixels du monde
+function surfaceTo(list, g) {
+  const prev = A.g;
+  A.g = g;
+  try {
+    const sorted = list.slice().sort((a, b) => DPi(a) - DPi(b));
+    for (const i of sorted) if (isWet(i) || nb4(i).some(isWet) || nb4(i).length < 6) paintSea(i);
+    for (const i of sorted) if (!isWet(i)) paintLand(i);
+  } finally {
+    A.g = prev;
+  }
+}
+function layer(c, box, sc) {
+  const t = document.createElement('canvas');
+  t.width = c.width;
+  t.height = c.height;
+  const g = t.getContext('2d');
+  g.setTransform(sc, 0, 0, sc, -box[0] * sc, -box[1] * sc);
+  g.lineJoin = 'round';
+  return [t, g];
+}
+function paintSurface(ts, c, box, sc) {
+  const own = new Set(ts),
+    wide = new Set(ts);
+  for (let r = 0; r < 2; r++) for (const i of [...wide]) for (const j of nb4(i)) wide.add(j);
+  const [S, gs] = layer(c, box, sc);
+  surfaceTo([...wide], gs);
+  let soft = S;
+  const [B, gb] = layer(c, box, sc);
+  gb.setTransform(1, 0, 0, 1, 0, 0);
+  let blurred = false;
+  try {
+    gb.filter = `blur(${(SOFT * sc).toFixed(1)}px)`;
+    blurred = gb.filter !== 'none' && gb.filter !== '';
+  } catch (e) {}
+  if (blurred) {
+    gb.drawImage(S, 0, 0);
+    gb.filter = 'none';
+    // sous le flou, le sol net : les bords de la carte et les fonds restent pleins
+    gb.globalCompositeOperation = 'destination-over';
+    gb.drawImage(S, 0, 0);
+    soft = B;
+  }
+  // masque : les cases du bloc, élargies d'un pixel dans toutes les directions
+  const [M, gm] = layer(c, box, sc);
+  surfaceTo(ts, gm);
+  const [M2, gm2] = layer(c, box, sc);
+  gm2.setTransform(1, 0, 0, 1, 0, 0);
+  for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) gm2.drawImage(M, dx * Math.max(1, sc), dy * Math.max(1, sc));
+  const g = c.getContext('2d');
+  g.save();
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.drawImage(M2, 0, 0);
+  g.globalCompositeOperation = 'source-in';
+  g.drawImage(soft, 0, 0);
+  g.restore();
+  void own;
+}
 function paintChunk(ts, box, sc) {
   const [x0, y0, x1, y1] = box,
     c = document.createElement('canvas');
@@ -430,15 +551,8 @@ function paintChunk(ts, box, sc) {
   A.g.lineJoin = 'round';
   try {
     const sorted = ts.slice().sort((a, b) => DPi(a) - DPi(b));
-    // 1. la mer, sous les rivages aussi, pour que les criques arrondies laissent voir l'eau
-    for (const i of sorted) if (isWet(i) || nb4(i).some(isWet) || nb4(i).length < 6) paintSea(i);
-    // 2. les terres, de l'arrière vers l'avant
-    for (const i of sorted)
-      if (!isWet(i)) {
-        const G = geo(i);
-        for (const [p, cl] of G.tris) P(p, cl, cl, 0.6);
-        for (const [p, cl] of G.cliffs) P(p, cl, cl, 0.6);
-      }
+    // 1-2. la mer et les terres, adoucies par un léger flou : voir paintSurface
+    paintSurface(ts, c, box, sc);
     // 3. les chemins, bordure puis bande
     const roads = sorted.filter(i => A.S.road[i]);
     roadLayer(roads, true);

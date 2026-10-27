@@ -214,13 +214,16 @@ function render(time) {
     const cxw = ((time * 0.006 + k * 820) % 3400) - 700,
       cyw = 200 + k * 230 - ((time * 0.003 + k * 300) % 900);
     const gr = ctx.createRadialGradient(cxw, cyw, 10, cxw, cyw, 260);
-    gr.addColorStop(0, 'rgba(70,96,120,.16)');
-    gr.addColorStop(1, 'rgba(70,96,120,0)');
+    gr.addColorStop(0, 'rgba(90,104,118,.22)');
+    gr.addColorStop(1, 'rgba(90,104,118,0)');
     ctx.fillStyle = gr;
     ctx.beginPath();
     ctx.ellipse(cxw, cyw, 320, 170, 0, 0, 7);
     ctx.fill();
   }
+  // ciel couvert : un voile gris-bleu léger sur toute la scène
+  ctx.fillStyle = 'rgba(222,230,238,.25)';
+  ctx.fillRect(vx0 - 200, vy0 - 200, vx1 - vx0 + 400, vy1 - vy0 + 400);
   ctx.restore();
   drawFX(time);
   if (A.sel && A.S.b[A.sel]) {

@@ -5,7 +5,7 @@ import { B } from '../data/buildings';
 import { AC, INK, OUTLINE } from '../data/palette';
 import { A } from '../app/state';
 import { CR, DP2, SR, TILT, W, ZH, ZW, bc, fshade, vis } from './projection';
-import { P, bbox, blur, ln, mix, pick3, sh, shadowSprite, sprite, strokes } from './kit';
+import { P, bbox, blur, gtri, ln, mix, pick3, rgbs, sh, shadowSprite, sprite, strokes } from './kit';
 import { TCOL } from '../data/palette';
 import { figure, shipFig, smoke } from './units';
 import { monProg } from '../app/game';
@@ -103,13 +103,19 @@ function facets(sp, col, rnd, amp) {
 }
 /* une face plane : arêtes vives, découpée en quelques facettes de tons voisins (et, dans l'ancien style, un trait de crayon) */
 function face(sp, col, rnd, tex, sh2, pw) {
-  P(sp, col, col, 0.5);
-  A.g.save();
-  pathPts(sp, true);
-  A.g.clip();
-  facets(sp, col, rnd, 0.1);
-  if (tex && !tex.surf) tex(sp, col, rnd);
-  A.g.restore();
+  // une face lisse, à peine plus claire en haut qu'en bas
+  const [, y0, , y1] = bbox(sp),
+    grd = A.g.createLinearGradient(0, y0, 0, y1);
+  grd.addColorStop(0, sh(col, 1.05));
+  grd.addColorStop(1, sh(col, 0.93));
+  P(sp, grd, grd, 0.5);
+  if (tex && !tex.surf) {
+    A.g.save();
+    pathPts(sp, true);
+    A.g.clip();
+    tex(sp, col, rnd);
+    A.g.restore();
+  }
   if (OUTLINE) pencil(roundPts(sp, 1.6), true, pw || 0.75, rnd, INK, 0.6);
   return sp;
 }
@@ -357,7 +363,15 @@ for (const k of ['stone', 'plank', 'chaux']) TX[k].surf = 1;
     return f;
   };
 }
-const NC = 8;
+const NC = 16;
+function rgbOf(col) {
+  if (col[0] === '#') {
+    const n = parseInt(col.slice(1), 16);
+    return [n >> 16, (n >> 8) & 255, n & 255];
+  }
+  const m = col.match(/[\d.]+/g);
+  return [+m[0], +m[1], +m[2]];
+}
 function cyl(cx, cy, r, z0, z1, col, rnd, tex) {
   const bot = [],
     top = [];
@@ -374,11 +388,12 @@ function cyl(cx, cy, r, z0, z1, col, rnd, tex) {
       W(cx + Math.cos(a1) * r, cy + Math.sin(a1) * r, z1),
       W(cx + Math.cos(a0) * r, cy + Math.sin(a0) * r, z1),
     ];
-    const f = fshade(nx, ny),
-      c1 = sh(col, f * 1.1 * (1 + (rnd() - 0.5) * 0.08)),
-      c2 = sh(col, f * 1.1 * (0.94 + (rnd() - 0.5) * 0.06));
-    P([sp[0], sp[1], sp[2]], c1, c1, 0.7);
-    P([sp[0], sp[2], sp[3]], c2, c2, 0.7);
+    // mur arrondi : la teinte suit la direction de chaque bord, un peu plus sombre au pied
+    const b0 = rgbOf(col),
+      l0 = b0.map(v => v * fshade(Math.cos(a0), Math.sin(a0)) * 1.1),
+      l1 = b0.map(v => v * fshade(Math.cos(a1), Math.sin(a1)) * 1.1);
+    gtri(sp[0], sp[1], sp[2], l0.map(v => v * 0.92), l1.map(v => v * 0.92), l1);
+    gtri(sp[0], sp[2], sp[3], l0.map(v => v * 0.92), l1, l0);
   }
   const outl = [];
   for (let k = 0; k <= 24; k++) {
@@ -407,19 +422,19 @@ function cone(cx, cy, r, z, h, col, rnd, kind) {
     fs.push([a0, a1, Math.cos(am), Math.sin(am)]);
   }
   fs.sort((p, q) => p[2] * SR + p[3] * CR - (q[2] * SR + q[3] * CR));
-  for (const [a0, a1, nx, ny] of fs) {
-    const sp = [W(cx + Math.cos(a0) * r, cy + Math.sin(a0) * r, z), W(cx + Math.cos(a1) * r, cy + Math.sin(a1) * r, z), ap];
-    const v = nx * SR + ny * CR > 0,
-      f = v ? Math.min(1.25, fshade(nx, ny) * 1.18 + 0.06) : 1.1;
-    P(sp, sh(col, f), sh(col, f), 0.8);
-    if (v) {
-      const m0 = [sp[0][0] + (ap[0] - sp[0][0]) * 0.45, sp[0][1] + (ap[1] - sp[0][1]) * 0.45],
-        m1 = [sp[1][0] + (ap[0] - sp[1][0]) * 0.45, sp[1][1] + (ap[1] - sp[1][1]) * 0.45],
-        c2 = sh(col, f * (1.07 + (rnd() - 0.5) * 0.05));
-      P([m0, m1, ap], c2, c2, 0.7);
-      const c3 = sh(col, f * (0.95 + (rnd() - 0.5) * 0.05));
-      P([sp[0], sp[1], m1], c3, c3, 0.6);
-    }
+  // éclairage lissé : chaque bord de la base prend la teinte de sa direction, le sommet la moyenne
+  const base0 = rgbOf(col),
+    lit = a => {
+      const nx = Math.cos(a),
+        ny = Math.sin(a),
+        f = nx * SR + ny * CR > 0 ? Math.min(1.25, fshade(nx, ny) * 1.18 + 0.06) : 1.1;
+      return base0.map(v => v * f);
+    },
+    apc = base0.map(v => v * 1.12);
+  for (const [a0, a1] of fs) {
+    const p0 = W(cx + Math.cos(a0) * r, cy + Math.sin(a0) * r, z),
+      p1 = W(cx + Math.cos(a1) * r, cy + Math.sin(a1) * r, z);
+    gtri(p0, p1, ap, lit(a0), lit(a1), apc);
   }
   const base = [];
   for (let k = 0; k <= 24; k++) {
@@ -519,8 +534,9 @@ function ground(s, col, rnd, ins) {
   onGround(() => {
     const c = mix(col, TCOL.g, 0.22),
       pts = outline(s, Math.min(0.96, (ins || 0.9) * 0.95), 0.22).map(([x, y]) => W(x + (rnd() - 0.5) * 0.03, y + (rnd() - 0.5) * 0.03, 0.6));
-    P(pts, c, c, 0.6);
-    facets(pts, c, rnd, 0.06);
+    // terre battue aux bords adoucis
+    const sm = smoothPts(pts.map(p => [p[0], p[1]]));
+    P(sm, c, c, 0.6);
   });
 }
 function post(x, y, z0, z1, rnd, col) {
@@ -841,14 +857,13 @@ function houseArt(L, v, rnd) {
   banner(-0.36, 0.22, 0, 30, AC.guede, rnd);
 }
 function farmArt2(st, rnd) {
-  const col = ['#b08458', '#a4a05a', '#86b04e', '#efc556'][st];
+  const col = ['#a07a52', '#93905a', '#7fa05a', '#e3bd55'][st];
   onGround(() => {
     const sp = outline(2, 0.95, 0.12).map(([x, y]) => W(x, y, 0.5));
     P(sp, col, col, 0.6);
     A.g.save();
     pathPts(sp, true);
     A.g.clip();
-    facets(sp, col, rnd, 0.05);
     for (let k = -13; k <= 13; k++) {
       const a = W(-1.1, k * 0.08),
         b = W(1.1, k * 0.08);
@@ -863,7 +878,7 @@ function farmArt2(st, rnd) {
           const x = a[0] + (b[0] - a[0]) * t,
             y = a[1] + (b[1] - a[1]) * t,
             h = [0, 2, 4.5, 7][st];
-          A.g.strokeStyle = st === 3 ? (rnd() < 0.5 ? '#f6d872' : '#d9a634') : rnd() < 0.5 ? '#5f9a4a' : '#8dbb5e';
+          A.g.strokeStyle = st === 3 ? (rnd() < 0.5 ? '#f2d27a' : '#c99a3a') : rnd() < 0.5 ? '#5f9a4a' : '#8dbb5e';
           A.g.lineWidth = 0.9;
           A.g.beginPath();
           A.g.moveTo(x, y);
@@ -1444,7 +1459,7 @@ const ART2 = {
     [AC.guede, AC.ocre, AC.ajonc].forEach((c, k) => shield3(0.26 + k * 0.15, 0.44, 4, c, rnd));
   },
   grove(rnd) {
-    ground(3, '#6fa04c', rnd, 0.94);
+    ground(3, '#6ea56f', rnd, 0.94);
     A.g.strokeStyle = 'rgba(240,232,200,.4)';
     A.g.lineWidth = 1.2;
     const [cx, cy] = W(0, 0);

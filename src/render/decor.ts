@@ -71,14 +71,31 @@ function mass(x, y, rx, ry, base, rnd, opt) {
 
 /* ---------- prismes verticaux : pierres levées, tronc, montants ---------- */
 /* silhouette en colonnes : bas (gauche → droite) et haut (gauche → droite) ; chaque bande verticale est une facette */
+/* volume vertical (pierre levée, tronc) : un seul contour, éclairé à gauche et fondu vers l'ombre à droite */
 function column(bot, top, base, rnd, amp) {
-  const n = bot.length;
-  for (let k = 0; k < n - 1; k++) {
-    const t = n > 2 ? k / (n - 2) : 0,
-      f = (1.16 - 0.38 * t) * (1 + (rnd() - 0.5) * (amp ?? 0.05)),
-      col = sh(base, f);
-    P([bot[k], bot[k + 1], top[k + 1], top[k]], col, col, 0.5);
+  const pts = [...bot, ...top.slice().reverse()],
+    g = A.g;
+  let x0 = 1e9,
+    x1 = -1e9;
+  for (const p of pts) {
+    x0 = Math.min(x0, p[0]);
+    x1 = Math.max(x1, p[0]);
   }
+  const grd = g.createLinearGradient(x0, 0, x1, 0);
+  grd.addColorStop(0, sh(base, 1.16));
+  grd.addColorStop(0.45, sh(base, 1));
+  grd.addColorStop(1, sh(base, 0.74));
+  g.beginPath();
+  g.moveTo(pts[0][0], pts[0][1]);
+  for (let k = 1; k < pts.length; k++) {
+    const p = pts[k - 1],
+      q = pts[k];
+    g.quadraticCurveTo(p[0], p[1], (p[0] + q[0]) / 2, (p[1] + q[1]) / 2);
+  }
+  g.lineTo(pts[pts.length - 1][0], pts[pts.length - 1][1]);
+  g.closePath();
+  g.fillStyle = grd;
+  g.fill();
 }
 function trunk(x, y, w, h, lean, col, rnd) {
   column(
@@ -269,7 +286,7 @@ function menhirGrand(rnd) {
   softShadow(18, 4, 22, 6);
   contact(0, 3, 2.4);
   const h = 98,
-    b = '#aeaaa2';
+    b = '#b49c95';
   column(
     [[-12, 4], [-4, 7], [5, 7], [12, 4]],
     [[-7, -h * 0.9], [-2, -h], [4, -h * 0.97], [8, -h * 0.82]],
@@ -293,7 +310,7 @@ function dolmen(rnd) {
   // bruyère et ajoncs autour de la chambre
   for (const p of spotsIn(6, 40, 16, rnd).filter(p => p[1] < -4)) tuft(p[0], p[1], 1.1, pick3(rnd, [...VEG.heather, ...VEG.gorse]), rnd);
   softShadow(14, 6, 42, 12);
-  const stone = '#bfbab2';
+  const stone = '#ad968f';
   const upright = (x, y, h, w) =>
     column([[x - w, y], [x, y + 2], [x + w, y]], [[x - w * 0.9, y - h], [x, y - h - 1.5], [x + w * 0.9, y - h - 0.5]], stone, rnd, 0.06);
   upright(-22, -4, 23, 5);
@@ -335,7 +352,7 @@ function greatOak(rnd) {
     P([[0, -3], [Math.cos(a) * l, 3 + Math.sin(a) * 3], [Math.cos(a) * l * 0.6, 6]], sh(VEG.trunk, 0.85));
   trunk(0, 5, 9, 40, 3, VEG.trunk, rnd);
   // le houppier : de larges blocs, de l'arrière vers l'avant
-  const greens = ['#3f7a34', '#468638', '#4f8f3a', '#5a9b40'];
+  const greens = ['#3a4a33', '#3c4f37', '#435a3b', '#4b5f3a'];
   for (const [x, y, rx, ry, k] of [
     [-24, -54, 20, 14, 0],
     [24, -58, 21, 14, 0],
@@ -347,7 +364,7 @@ function greatOak(rnd) {
   ])
     gem(x, y, rx, ry, greens[k], rnd, { n: 9, lift: 0.3 });
   // le gui, en boules vert pâle
-  for (let k = 0; k < 4; k++) gem(-18 + rnd() * 36, -86 + rnd() * 34, 3, 2.4, '#c9dc8a', rnd, { n: 6, lift: 0.4 });
+  for (let k = 0; k < 4; k++) gem(-18 + rnd() * 36, -86 + rnd() * 34, 3, 2.4, '#b9c98a', rnd, { n: 6, lift: 0.4 });
   // fleurs au pied
   for (const p of spotsIn(6, 30, 10, rnd).filter(p => p[1] > 2)) tuft(p[0], p[1] + 4, 0.8, pick3(rnd, [...VEG.flower, ...VEG.grass]), rnd);
 }

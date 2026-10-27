@@ -143,6 +143,66 @@ function P(pts, fill, stroke, lw) {
     A.g.stroke();
   }
 }
+/*
+ * Triangle en dégradé : chaque sommet a sa couleur [r, g, b] et la couleur varie linéairement entre eux
+ * (ombrage de Gouraud). Le canevas ne sait faire que des dégradés linéaires : on prend la direction où
+ * la luminosité change le plus et l'on y pose les deux couleurs extrêmes. Bordé de son propre dégradé
+ * pour effacer les jours entre triangles voisins.
+ */
+function rgbs(c) {
+  const k = v => Math.max(0, Math.min(255, Math.round(v)));
+  return `rgb(${k(c[0])},${k(c[1])},${k(c[2])})`;
+}
+function gtri(p0, p1, p2, c0, c1, c2) {
+  const g = A.g;
+  const ex = p1[0] - p0[0],
+    ey = p1[1] - p0[1],
+    fx = p2[0] - p0[0],
+    fy = p2[1] - p0[1],
+    det = ex * fy - ey * fx;
+  const lum = c => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2];
+  const l0 = lum(c0),
+    l1 = lum(c1) - l0,
+    l2 = lum(c2) - l0;
+  let style;
+  if (Math.abs(det) < 1e-6 || (Math.abs(l1) < 0.6 && Math.abs(l2) < 0.6)) {
+    style = rgbs([(c0[0] + c1[0] + c2[0]) / 3, (c0[1] + c1[1] + c2[1]) / 3, (c0[2] + c1[2] + c2[2]) / 3]);
+  } else {
+    // gradient de la luminosité dans le plan de l'écran
+    const gx = (l1 * fy - l2 * ey) / det,
+      gy = (l2 * ex - l1 * fx) / det,
+      gn = Math.hypot(gx, gy),
+      nx = gx / gn,
+      ny = gy / gn;
+    const t = [0, ex * nx + ey * ny, fx * nx + fy * ny],
+      tmin = Math.min(...t),
+      tmax = Math.max(...t);
+    const A0 = [p0[0] + nx * tmin, p0[1] + ny * tmin],
+      B0 = [p0[0] + nx * tmax, p0[1] + ny * tmax];
+    // couleur d'un point du plan par coordonnées barycentriques (extrapolées hors du triangle)
+    const at = q => {
+      const qx = q[0] - p0[0],
+        qy = q[1] - p0[1],
+        b1 = (qx * fy - qy * fx) / det,
+        b2 = (ex * qy - ey * qx) / det,
+        b0 = 1 - b1 - b2;
+      return [0, 1, 2].map(k => b0 * c0[k] + b1 * c1[k] + b2 * c2[k]);
+    };
+    style = g.createLinearGradient(A0[0], A0[1], B0[0], B0[1]);
+    style.addColorStop(0, rgbs(at(A0)));
+    style.addColorStop(1, rgbs(at(B0)));
+  }
+  g.beginPath();
+  g.moveTo(p0[0], p0[1]);
+  g.lineTo(p1[0], p1[1]);
+  g.lineTo(p2[0], p2[1]);
+  g.closePath();
+  g.fillStyle = style;
+  g.fill();
+  g.strokeStyle = style;
+  g.lineWidth = 1;
+  g.stroke();
+}
 /* un triangle plein, bordé de sa propre couleur pour effacer les jours entre facettes voisines */
 function tri(a, b, c, col) {
   P([a, b, c], col, col, 0.5);
@@ -205,67 +265,55 @@ function blur(on) {
 }
 
 /*
- * Volume à facettes vu d'en haut : un anneau extérieur irrégulier, un anneau intérieur décalé vers le soleil
- * et un sommet. Chaque facette est éclairée selon son orientation à l'écran (soleil en haut à gauche).
- * Sert aux houppiers, aux rochers, aux touffes de lande.
+ * Volume arrondi vu d'en haut (houppier, rocher, touffe) : un contour irrégulier lissé en courbes,
+ * rempli d'un dégradé radial qui part d'un reflet tourné vers le soleil et s'assombrit vers le bord opposé.
  */
 const LDIR = [-0.72, -0.69];
+function smoothLoop(pts) {
+  const n = pts.length,
+    o = [];
+  for (let k = 0; k < n; k++) {
+    const p = pts[(k + n - 1) % n],
+      c = pts[k],
+      q = pts[(k + 1) % n];
+    const a = [(p[0] + c[0]) / 2, (p[1] + c[1]) / 2],
+      b = [(c[0] + q[0]) / 2, (c[1] + q[1]) / 2];
+    for (let t = 0; t < 1; t += 1 / 5) {
+      const u = 1 - t;
+      o.push([u * u * a[0] + 2 * u * t * c[0] + t * t * b[0], u * u * a[1] + 2 * u * t * c[1] + t * t * b[1]]);
+    }
+  }
+  return o;
+}
 function gem(x, y, rx, ry, base, rnd, opt = {}) {
   // dessiné en pixels, debout : il ne projette pas d'ombre calculée (les arbres et rochers ont leur ombre douce)
   if (A.SHADOW) return [];
   const n = opt.n || 8,
     v = opt.v ?? 0.22,
     amp = opt.amp ?? 0.3,
-    o = [],
-    m = Math.max(3, Math.round(n / 2)),
-    inner = [];
+    o = [];
   const rot = rnd() * Math.PI * 2;
   for (let k = 0; k < n; k++) {
     const a = rot + (k / n) * Math.PI * 2 + (rnd() - 0.5) * 0.35,
       f = 1 - v / 2 + rnd() * v;
     o.push([x + Math.cos(a) * rx * f, y + Math.sin(a) * ry * f]);
   }
-  const cx = x + LDIR[0] * rx * 0.16,
-    cy = y + LDIR[1] * ry * 0.22 - (opt.lift ?? 0.12) * ry;
-  for (let k = 0; k < m; k++) {
-    const a = rot + ((k + 0.5) / m) * Math.PI * 2;
-    inner.push([cx + Math.cos(a) * rx * 0.48, cy + Math.sin(a) * ry * 0.46]);
-  }
-  const shade = (px, py, top) => {
-    let dx = px - x,
-      dy = (py - y) * (rx / ry);
-    const d = Math.hypot(dx, dy) || 1;
-    const dot = (dx / d) * LDIR[0] + (dy / d) * LDIR[1];
-    return (top ? 1.07 + amp * 0.35 * dot : 0.9 + amp * dot) * (1 + (rnd() - 0.5) * 0.06);
-  };
-  // bande extérieure : chaque arête de l'anneau extérieur rejoint le point intérieur le plus proche
-  const near = p => {
-    let b = inner[0],
-      bd = 1e9;
-    for (const q of inner) {
-      const d = (q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2;
-      if (d < bd) {
-        bd = d;
-        b = q;
-      }
-    }
-    return b;
-  };
-  P(o, sh(base, 0.9));
-  for (let k = 0; k < n; k++) {
-    const p = o[k],
-      q = o[(k + 1) % n],
-      a = near(p),
-      b = near(q);
-    tri(p, q, b, sh(base, shade((p[0] + q[0] + b[0]) / 3, (p[1] + q[1] + b[1]) / 3, false)));
-    if (a !== b) tri(p, b, a, sh(base, shade((p[0] + a[0] + b[0]) / 3, (p[1] + a[1] + b[1]) / 3, false)));
-  }
-  for (let k = 0; k < m; k++) {
-    const p = inner[k],
-      q = inner[(k + 1) % m];
-    tri([cx, cy], p, q, sh(base, shade((p[0] + q[0] + cx) / 3, (p[1] + q[1] + cy) / 3, true)));
-  }
-  return o;
+  const sp = smoothLoop(o),
+    g = A.g;
+  const hx = x + LDIR[0] * rx * 0.4,
+    hy = y + LDIR[1] * ry * (0.45 + (opt.lift ?? 0.2) * 0.4),
+    R = Math.max(rx, ry) * 1.45;
+  const grd = g.createRadialGradient(hx, hy, 0, hx, hy, R);
+  grd.addColorStop(0, sh(base, 1 + amp * 0.62));
+  grd.addColorStop(0.5, base);
+  grd.addColorStop(1, sh(base, 1 - amp * 0.95));
+  g.beginPath();
+  g.moveTo(sp[0][0], sp[0][1]);
+  for (let k = 1; k < sp.length; k++) g.lineTo(sp[k][0], sp[k][1]);
+  g.closePath();
+  g.fillStyle = grd;
+  g.fill();
+  return sp;
 }
 
-export { OUT, P, LDIR, bbox, canPaint, blit, blur, gem, ln, mix, pick3, sh, shadowSprite, sprite, spriteLevel, levelFor, strokes, tri };
+export { OUT, P, LDIR, bbox, canPaint, gtri, rgbs, blit, blur, gem, ln, mix, pick3, sh, shadowSprite, sprite, spriteLevel, levelFor, strokes, tri };

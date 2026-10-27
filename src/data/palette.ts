@@ -11,35 +11,35 @@ const WALK = {
 };
 
 /*
- * Couleurs du terrain : prairie lumineuse, lande d'ajoncs jaune-orangé, sous-bois de chênes, granit gris,
- * plages blondes. Chaque facette en dérive par un léger écart de ton, calculé d'après le soleil.
+ * Couleurs du terrain : les tons gris-verts et gris-bleus d'une Armorique sous un ciel changeant,
+ * reprises de la première version. Seules les plages sont plus claires et plus chaudes.
  */
 const TCOL = {
-  g: '#86b24f', // prairie
-  l: '#c9a650', // lande : terre chaude sous les ajoncs
-  f: '#4c7f38', // sous-bois des forêts de chênes
-  r: '#9c9f9d', // sol rocheux, granit
-  b: '#e8c27c', // plage
-  cliff: '#a19c96', // falaises de granit
+  g: '#7b9467', // prairie
+  l: '#7f7a66', // lande
+  f: '#4b5a45', // sous-bois
+  r: '#8f837d', // sol rocheux
+  b: '#e3cb94', // plage, sable blond
+  cliff: '#9a8a84', // falaises
 };
 
-/* La mer, des hauts-fonds turquoise au grand large. L'indice suit la distance à la côte (1 à 9). */
-const SEA = ['#4cb3c6', '#3d9ec0', '#2e86b5', '#2470a8', '#1e5f9b', '#1a528e', '#174886', '#15417f', '#143d79', '#133a75'];
+/* La mer, des hauts-fonds au large, dans les gris-bleus d'origine. L'indice suit la distance à la côte (1 à 9). */
+const SEA = ['#5b7c80', '#4e7078', '#46666f', '#3d5a65', '#36525e', '#314b58', '#2e4755', '#2b4553', '#294351', '#284250'];
 /* Couleur du large, qui prolonge la mer au-delà de la carte. */
 const DEEP = SEA[9];
 
 /* Végétation et rochers posés sur le terrain. */
 const VEG = {
-  oak: ['#4f8f3a', '#5a9b40', '#468638', '#3f7a34', '#62a344'],
-  trunk: '#6b5440',
-  pine: ['#2f6a45', '#377552'],
-  gorse: ['#f2c230', '#f0b02c', '#e8952e'],
-  heather: ['#b46aa8', '#9d5c99'],
-  grass: ['#77a845', '#93bd55', '#6c9c3f'],
-  flower: ['#f4e9c8', '#f2d35c'],
-  rock: ['#b4b8b5', '#a5aaa8', '#c2c4c0'],
-  rockDark: '#878c8c',
-  floor: ['#4c7f38', '#5a8c3e', '#426f33'],
+  oak: ['#3c4f37', '#435a3b', '#4b5f3a', '#506640', '#3a4a33'],
+  trunk: '#5e5040',
+  pine: ['#2f4134', '#3a4f3e'],
+  gorse: ['#d4b23c', '#c9a33a'],
+  heather: ['#8e6c8f', '#7d5f80', '#9a789c'],
+  grass: ['#6a8458', '#56704a', '#5d7a4a'],
+  flower: ['#e6e2d4', '#d9cf8a'],
+  rock: ['#b49c95', '#a8908a', '#c2aaa2'],
+  rockDark: '#8f7872',
+  floor: ['#4b5a45', '#3e4c38', '#45533d'],
 };
 
 /* Le trait de crayon et les hachures de l'ancien style illustré : désactivés dans le style en facettes. */
@@ -47,20 +47,20 @@ const OUTLINE = false;
 const INK = '#2a241c';
 
 const AC = {
-  chaux: '#f6f1e6',
-  granit: '#cfc6be',
-  granitD: '#aca39b',
-  ardoise: '#5f7896',
-  chaume: '#e2b65c',
+  chaux: '#f3ede1',
+  granit: '#d9bdb1',
+  granitD: '#b99d93',
+  ardoise: '#687c96',
+  chaume: '#d9b062',
   bois: '#8e6847',
-  boisC: '#b88c5a',
-  guede: '#3d78c2',
-  ajonc: '#f2c230',
-  bruyere: '#b46aa8',
-  ocre: '#d65a36',
+  boisC: '#b48a5c',
+  guede: '#4a7db8',
+  ajonc: '#ecc63f',
+  bruyere: '#a676aa',
+  ocre: '#cc5b3e',
   mousse: '#6ea56f',
-  terre: '#c2a46c',
-  pave: '#d8cdb8',
+  terre: '#b8a07a',
+  pave: '#d3c8b6',
   fer: '#7d8896',
   mer: '#4f9aa0',
 };
