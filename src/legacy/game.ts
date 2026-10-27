@@ -7,6 +7,7 @@ import { idx, X, Y, inb, SQ3, HR, HX, HY, cube, fromCube, hdist, DIRS, nbDir, NB
 import { generateWorld } from '../world/generate';
 import { buildings, tilesOf as tilesOfB, access as accessOf, jobsOf, monumentDone, isHouse } from '../sim/query';
 import { assignLabor, payWages, rations } from '../sim/labor';
+import { needsOf, housingMonth } from '../sim/housing';
 import { taxRate as taxRateOf, accrueTax, collectTax, monthlyTaxDue, taxPending } from '../sim/tax';
 import { seaDepth, landDistance } from '../world/terrain';
 import { MONTHS } from '../data/calendar';
@@ -284,38 +285,14 @@ function immigrate(){
 function staff(){assignLabor(S);}
 function taxRate(){return taxRateOf(S);}
 function taxDue(){return monthlyTaxDue(S);}
-function hasOf(h){
-  const wells=blds().filter(b=>b.type==='well');
-  const water=wells.some(w=>hdist(idx(w.x,w.y),idx(h.x,h.y))<=3);
-  const fs=h.food.ble+h.food.porc;
-  return{water,food:fs>0,types2:h.food.ble>0&&h.food.porc>0,relig:S.mi-h.relig<=4||nearMenhir(h),cerv:h.cerv>0,ent:S.mi-h.ent<=4,torq:h.torq>0};
-}
-function lvlFor(a){let d=1;if(a.water&&a.food){d=2;if(a.relig&&a.cerv){d=3;if(a.types2&&a.ent&&a.torq)d=4;}}return d;}
+function hasOf(h){return needsOf(S,h);}
 function monthly(){
-  const hs=blds().filter(b=>b.type==='hut');
   // emploi
   staff();const{due,paid:wages}=payWages(S);
   if(wages<due&&!S.flags.unpaid){S.flags.unpaid=1;log("Le trésor est vide : les ouvriers travaillent à crédit en attendant le tribut.");}if(S.money>50)S.flags.unpaid=0;
   // maisons
-  let hungry=0,covered=0,occ=0;
-  for(const h of hs){
-    if(h.pop<=0)continue;occ++;
-    const a=hasOf(h);h.has=a;
-    if(a.relig)covered++;
-    const d=lvlFor(a);
-    if(d>h.lvl){h.lvl++;h.bad=0;
-      if(h.lvl===3&&!S.flags.l3){S.flags.l3=1;log("Première longue maison : le village prend de l'importance.");}
-      if(h.lvl===4&&!S.flags.l4){S.flags.l4=1;log("Une famille noble s'installe dans une demeure digne d'elle.");}}
-    else if(d<h.lvl){h.bad++;if(h.bad>=2){h.lvl--;h.bad=0;}}
-    else h.bad=0;
-    if(h.pop>LV[h.lvl].cap)h.pop=LV[h.lvl].cap;
-    accrueTax(S,h);
-    let need=rations(h.pop);
-    for(const f of['porc','ble']){const t=Math.min(need,h.food[f]);h.food[f]-=t;need-=t;}
-    if(need>0){hungry++;h.hungry++;if(h.hungry>4&&h.pop>1&&R()<.4)h.pop--;}else h.hungry=0;
-    if(h.lvl>=3)h.cerv=Math.max(0,h.cerv-1);
-    if(h.lvl>=4)h.torq=Math.max(0,h.torq-.25);
-  }
+  const hr=housingMonth(S,R);const{hungry,covered,occupied:occ}=hr;
+  for(const e of hr.events)log(e.level===3?"Première longue maison : le village prend de l'importance.":"Une famille noble s'installe dans une demeure digne d'elle.");
   S.hungry=occ?hungry/occ:0;
   // faveur
   const target=Math.min(100,(occ?covered/occ*100:50)+(monDone('menhirs')?15:0));
@@ -541,7 +518,6 @@ function stepMon(b,ef){const d=B[b.type];
 const MONMSG={menhirs:"L'alignement de menhirs est dressé. Les dieux contemplent l'oppidum avec bienveillance.",
   tumulus:"Le tumulus royal est achevé. Les ancêtres veillent : le tribut rentre mieux et les familles affluent.",
   heroes:"Le sanctuaire des héros est consacré. Les guerriers se battent désormais avec la force de leurs ancêtres."};
-function nearMenhir(h){return blds().some(b=>b.type==='menhirs'&&b.done&&hdist(idx(b.x,b.y),idx(h.x,h.y))<=7);}
 function godsMonthly(){
   const bonus=monDone('menhirs')?15:0;
   for(const gd of['taranis','belenos','epona']){const n=blds().filter(b=>b.type==='t_'+gd&&b.wk>0).length;const tg=Math.min(100,35+30*n+bonus);S.gf[gd]+=(tg-S.gf[gd])*.2;}
