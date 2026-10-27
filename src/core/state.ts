@@ -84,13 +84,33 @@ export interface House extends Building {
   lastTax: number;
 }
 
+/** Personnage qui circule sur les chemins : marchande, druide, prêtre, barde, collecteur, porteur, migrant. */
 export interface Walker {
-  k: string;
+  k: 'market' | 'druid' | 'priest' | 'bard' | 'tax' | 'cart' | 'immigrant';
+  /** Case actuelle, case visée et avancement entre les deux (de 0 à 1). */
   cur: number;
   nxt: number;
   t: number;
+  /** Bâtiment d'origine (0 pour un migrant). */
   home: number;
-  [extra: string]: unknown;
+  prev?: number;
+  /** Pas parcourus en tournée, cases et maisons déjà vues. */
+  steps?: number;
+  seen?: Record<string, number>;
+  /** Trajet imposé (porteur, migrant, retour de tournée) et position sur ce trajet. */
+  path?: number[];
+  pi?: number;
+  back?: boolean;
+  start?: number;
+  /** Destination, ressource et quantité transportées. */
+  target?: number;
+  res?: string;
+  amt?: number;
+  /** Panier de la marchande. */
+  carry?: Record<string, number>;
+  /** Dieu servi par un prêtre. */
+  god?: string;
+  dead?: boolean;
 }
 
 export interface Unit {

@@ -11,6 +11,8 @@ import { needsOf, housingMonth } from '../sim/housing';
 import { used, stockOf as stockOfS, take as takeS, putAny as putAnyS, findDepot, fillMarketBasket } from '../sim/stock';
 import { roadNb as roadNbS, roadSearch } from '../sim/paths';
 import { workshopStep } from '../sim/production';
+import { spawnWalker, killWalker, stepWalker } from '../sim/walkers';
+import { immigrate as immigrateS } from '../sim/migration';
 import { nearTerrain } from '../sim/query';
 import { taxRate as taxRateOf, accrueTax, collectTax, monthlyTaxDue, taxPending } from '../sim/tax';
 import { seaDepth, landDistance } from '../world/terrain';
@@ -151,52 +153,10 @@ function removeB(id){const b=S.b[id];if(!b||b.type==='port')return;FE=null;for(c
   for(const w of S.w)if(w.home===id||w.target===id)kill(w);if(sel===id)sel=null;}
 
 /* ---------- marcheurs ---------- */
-function spawn(w){w.t=0;w.prev=-1;w.steps=0;w.seen={};S.w.push(w);
-  if(w.path){w.pi=0;w.cur=w.path[0];if(w.path.length===1){w.nxt=w.cur;arrive(w);}else w.nxt=w.path[1];}
-  else{w.cur=w.nxt=w.start;serve(w);markVis(w);decide(w);}
-}
-function kill(w){if(w.dead)return;w.dead=true;const h=S.b[w.home];
-  if(w.k==='cart'&&h)h.cartOut=false;
-  if(w.k==='immigrant'){const t=S.b[w.target];if(t)t.inc=Math.max(0,t.inc-w.amt);}
-  if(['market','druid','bard','tax','priest'].includes(w.k)&&h){h.out=false;h.cool=30;}
-  if(w.k==='market'&&w.carry)for(const r in w.carry)if(w.carry[r]>0)putAny(r,w.carry[r]);
-}
-function arrive(w){
-  if(w.k==='cart'){const t=S.b[w.target];if(t&&B[t.type].store){const n=Math.min(w.amt,B[t.type].cap-used(t));t.stock[w.res]=(t.stock[w.res]||0)+n;if(n<w.amt)putAny(w.res,w.amt-n);}}
-  if(w.k==='immigrant'){const t=S.b[w.target];if(t){t.inc=Math.max(0,t.inc-w.amt);t.pop=Math.min(LV[t.lvl].cap,t.pop+w.amt);}w.dead=true;return;}
-  kill(w);
-}
-function stepW(w){
-  w.t+=WS;if(w.t<1)return;
-  w.t=0;w.prev=w.cur;w.cur=w.nxt;if(w.path)w.pi++;
-  if(!S.road[w.cur]){kill(w);return;}
-  serve(w);markVis(w);decide(w);
-}
-function decide(w){
-  if(w.path){if(w.pi>=w.path.length-1){arrive(w);return;}w.nxt=w.path[w.pi+1];return;}
-  w.steps++;
-  if(w.steps>=MAXSTEP){const h=S.b[w.home];if(!h){kill(w);return;}const set=access(h);
-    const r=bfs(w.cur,i=>set.includes(i));if(!r){kill(w);return;}w.path=r.path;w.pi=0;w.back=true;
-    if(r.path.length===1){arrive(w);return;}w.nxt=r.path[1];return;}
-  let o=roadNb(w.cur).filter(j=>j!==w.prev);
-  if(o.length>1){const fresh=o.filter(j=>!w.seen['t'+j]);if(fresh.length)o=fresh;}
-  w.seen['t'+w.cur]=1;
-  w.nxt=o.length?o[(R()*o.length)|0]:(w.prev>=0?w.prev:w.cur);
-}
-function serve(w){
-  if(!['market','druid','bard','tax','priest'].includes(w.k))return;
-  const cx=X(w.cur),cy=Y(w.cur);
-  for(let y=cy-2;y<=cy+2;y++)for(let x=cx-3;x<=cx+3;x++){if(!inb(x,y)||hdist(w.cur,idx(x,y))>2)continue;const id=S.occ[idx(x,y)];if(!id)continue;
-    const h=S.b[id];if(!h||h.type!=='hut'||h.pop<=0||w.seen[id])continue;w.seen[id]=1;
-    if(w.k==='druid'||w.k==='priest')h.relig=S.mi;
-    else if(w.k==='bard')h.ent=S.mi;
-    else if(w.k==='tax'){collectTax(S,h);}
-    else if(w.k==='market'){const per=Math.ceil(h.pop/4)*6;
-      for(const f of['ble','porc']){const g=Math.min(Math.max(0,per-h.food[f]),w.carry[f]||0);h.food[f]+=g;w.carry[f]-=g;}
-      if(h.lvl>=2){const g=Math.min(Math.max(0,3-h.cerv),w.carry.cervoise||0);h.cerv+=g;w.carry.cervoise-=g;}
-      if(h.lvl>=3){const g=Math.min(Math.max(0,2-h.torq),w.carry.torques||0);h.torq+=g;w.carry.torques-=g;}}
-  }
-}
+const WCTX={rand:()=>R(),onVisit:w=>markVis(w)};
+function spawn(w){return spawnWalker(S,w,WCTX);}
+function kill(w){killWalker(S,w);}
+function stepW(w){stepWalker(S,w,WCTX);}
 
 /* ---------- simulation ---------- */
 function stepSim(){
@@ -245,19 +205,7 @@ function sendCart(b,acc){
   spawn({k:'cart',home:b.id,target:best.val,res:r,amt:b.hold,path:best.path});
   b.hold=0;b.cartOut=true;b.status="Livraison en cours";
 }
-function immigrate(){
-  const imm=S.w.filter(w=>w.k==='immigrant').length;if(imm>=10)return;
-  if(S.pop>20&&S.hungry>.6&&R()<.5){S.block="la faim ralentit les arrivées";return;}
-  if(!monDone('tumulus')&&S.labor>10&&S.unemp>Math.max(8,S.labor*.3)){S.block="trop de bras sans travail";return;}
-  if(S.taxLvl===2&&R()<.4){S.block="le tribut lourd décourage les familles";return;}
-  S.block="";
-  const hs=blds().filter(h=>h.type==='hut'&&LV[h.lvl].cap-h.pop-h.inc>0);
-  if(!hs.length)return;
-  const h=hs[(R()*hs.length)|0];const set=access(h);if(!set.length)return;
-  const r=bfs(ENTRY(),i=>set.includes(i));if(!r)return;
-  const n=Math.min((S.gf&&S.gf.epona>70?5:4)+(S.taxLvl===0?1:0),LV[h.lvl].cap-h.pop-h.inc);h.inc+=n;
-  spawn({k:'immigrant',home:0,target:h.id,amt:n,path:r.path});
-}
+function immigrate(){immigrateS(S,WCTX);}
 
 
 

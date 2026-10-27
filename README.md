@@ -43,6 +43,8 @@ src/
     stock.ts          greniers et entrepôts, dépôt le plus proche, panier de la marchande
     production.ts     ateliers : rythme selon les ouvriers, matières premières, lots à livrer
     paths.ts          recherche de trajet sur les chemins
+    walkers.ts        marcheurs : tournées, service des maisons, marchande, porteurs
+    migration.ts      arrivée des familles par le port, et ce qui la freine
   data/               ce qui se règle sans toucher à la logique
     buildings.ts      définition des bâtiments et de la barre d'outils
     resources.ts      ressources et prix
@@ -81,12 +83,12 @@ Fait :
 - styles séparés de la page, construction en fichier unique avec Vite ;
 - état typé, sauvegarde versionnée avec migrations, stockage interchangeable, hasard reproductible (`core/state.ts`, `save.ts`, `storage.ts`) ;
 - génération de l'île typée et testée dans `world/` ; la grille hexagonale `core/hex.ts` est typée ;
-- `sim/` bien avancé : emplois, tribut, maisons, stocks et production typés et testés ; définitions des bâtiments, maisons, ressources et priorités typées.
+- `sim/` bien avancé : emplois, tribut, maisons, stocks, production, marcheurs et migrants typés et testés ; définitions des bâtiments, maisons, ressources et priorités typées.
 
 L'ordre des tirages au hasard dans `world/generate.ts` fixe la forme des îles : le modifier change l'île obtenue pour une graine donnée.
 
 À venir, dans cet ordre, chaque étape gardant le jeu jouable :
-1. fin de `sim/` : marcheurs et migrants, commerce, dieux, défense, puis la boucle de simulation elle-même ;
+1. fin de `sim/` : commerce, dieux, défense, puis la boucle de simulation elle-même ;
 2. `render/` : projection, caches, kit de dessin, terrain, décors, bâtiments, effets ;
 3. `ui/` : panneaux, barre d'outils, entrées ;
 4. retrait des `@ts-nocheck` et passage progressif en TypeScript strict.
