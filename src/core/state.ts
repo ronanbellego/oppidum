@@ -60,6 +60,13 @@ export interface Building {
   /** Monument achevé, et matériaux déjà livrés au chantier. */
   done?: boolean;
   got?: Record<string, number>;
+  /** Avancement de la production en cours, lot prêt à livrer, porteur en route, matières premières chargées. */
+  prog?: number;
+  hold?: number;
+  cartOut?: boolean;
+  loaded?: boolean;
+  /** État affiché dans la fiche du bâtiment. */
+  status?: string;
   [extra: string]: unknown;
 }
 

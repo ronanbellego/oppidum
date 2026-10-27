@@ -8,6 +8,10 @@ import { generateWorld } from '../world/generate';
 import { buildings, tilesOf as tilesOfB, access as accessOf, jobsOf, monumentDone, isHouse } from '../sim/query';
 import { assignLabor, payWages, rations } from '../sim/labor';
 import { needsOf, housingMonth } from '../sim/housing';
+import { used, stockOf as stockOfS, take as takeS, putAny as putAnyS, findDepot, fillMarketBasket } from '../sim/stock';
+import { roadNb as roadNbS, roadSearch } from '../sim/paths';
+import { workshopStep } from '../sim/production';
+import { nearTerrain } from '../sim/query';
 import { taxRate as taxRateOf, accrueTax, collectTax, monthlyTaxDue, taxPending } from '../sim/tax';
 import { seaDepth, landDistance } from '../world/terrain';
 import { MONTHS } from '../data/calendar';
@@ -97,20 +101,13 @@ function sh(col,f){const k=col+f;if(shc[k])return shc[k];let r,gg,bb;
   const c=v=>Math.max(0,Math.min(255,Math.round(v*f)));return shc[k]=`rgb(${c(r)},${c(gg)},${c(bb)})`;}
 function blds(){return buildings(S);}
 const tilesOf=tilesOfB;
-function roadNb(i){return nb4(i).filter(j=>S.road[j]);}
+function roadNb(i){return roadNbS(S,i);}
 function access(b){return accessOf(S,b);}
-function bfs(start,goal){
-  const prev=new Int32Array(N*N).fill(-2);prev[start]=-1;const q=[start];let h=0;
-  while(h<q.length){const i=q[h++];const g=goal(i);if(g){const p=[];let k=i;while(k!==-1){p.push(k);k=prev[k];}p.reverse();return{path:p,val:g};}
-    for(const j of roadNb(i))if(prev[j]===-2){prev[j]=i;q.push(j);}}
-  return null;
-}
-function used(b){let s=0;for(const k in b.stock)s+=b.stock[k];return s;}
-function stockOf(r){let s=0;for(const b of blds()){const d=B[b.type];if(d.store&&b.stock[r])s+=b.stock[r];}return s;}
-function take(r,n){for(const b of blds()){if(n<=0)break;const d=B[b.type];if(!d.store||!b.stock[r])continue;const t=Math.min(n,b.stock[r]);b.stock[r]-=t;n-=t;}return n<=0;}
-function putAny(r,n){for(const b of blds()){const d=B[b.type];if(!d.store||!d.store.includes(r))continue;const t=Math.min(n,d.cap-used(b));if(t>0){b.stock[r]=(b.stock[r]||0)+t;n-=t;}if(n<=0)break;}}
-
-function nearTer(b,t,r){let ok=false;for(const f of(foot(b.s,b.x,b.y)||[]))within(f,r,j=>{if(S.ter[j]===t)ok=true;});return ok;}
+function bfs(start,goal){return roadSearch(S,start,goal);}
+function stockOf(r){return stockOfS(S,r);}
+function take(r,n){return takeS(S,r,n);}
+function putAny(r,n){putAnyS(S,r,n);}
+function nearTer(b,t,r){return nearTerrain(S,b,t,r);}
 
 /* ---------- construction ---------- */
 function canPlace(type,x,y){
@@ -221,20 +218,7 @@ function updB(b){
   const jb=jobsOf(b),ef=jb?(b.wk||0)/jb:1;
   if(d.mon){stepMon(b,ef);return;}
   if(b.type==='tower'||b.type==='barracks'){stepDefB(b,acc,ef);return;}
-  if(d.out){
-    if(d.near&&!nearTer(b,d.near==='forest'?1:3,d.near==='forest'?2:1)){b.status="Ressource naturelle hors de portée";return;}
-    if(b.hold>0){if(!b.cartOut&&S.tick%10===0)sendCart(b,acc);return;}
-    if(d.inp&&!b.loaded){
-      const miss=Object.keys(d.inp).filter(r=>stockOf(r)<d.inp[r]);
-      if(miss.length){b.status="En attente de "+miss.map(r=>RES[r].n.toLowerCase()).join(' et ');return;}
-      for(const r in d.inp)take(r,d.inp[r]);b.loaded=true;
-    }
-    if(ef<=0){b.status="Personne pour y travailler : il faut plus d'habitants";return;}
-    b.status=ef<.99?"Travaille au ralenti, faute de bras":"Au travail";
-    b.prog+=ef;
-    if(b.prog>=d.time){b.prog=0;b.hold=d.batch;b.loaded=false;sendCart(b,acc);}
-    return;
-  }
+  if(d.out){if(workshopStep(S,b,ef))sendCart(b,acc);return;}
   if(d.roam){
     if(b.out){b.status="Marcheur en tournée";return;}
     if(ef<=0){b.status="Personne pour y travailler : il faut plus d'habitants";return;}
@@ -242,10 +226,8 @@ function updB(b){
     if(b.cool>0)return;
     const w={k:b.type==='market'?'market':d.roam,home:b.id,god:d.god,start:acc[(R()*acc.length)|0]};
     if(w.k==='market'){
-      const c={};let food=0;for(const f of['ble','porc'])food+=stockOf(f);
-      if(food<=0&&stockOf('cervoise')<=0&&stockOf('torques')<=0){b.status="Greniers vides : rien à vendre";b.cool=20;return;}
-      for(const f of['ble','porc']){const n=Math.min(70,stockOf(f));take(f,n);c[f]=n;}
-      for(const[r,m]of[['cervoise',20],['torques',8]]){const n=Math.min(m,stockOf(r));take(r,n);c[r]=n;}
+      const c=fillMarketBasket(S);
+      if(!c){b.status="Greniers vides : rien à vendre";b.cool=20;return;}
       w.carry=c;
     }
     b.out=true;spawn(w);
@@ -257,10 +239,7 @@ function updB(b){
 }
 function sendCart(b,acc){
   const d=B[b.type];const r=d.out;
-  let best=null;
-  for(const a of acc){const f=bfs(a,i=>{for(const j of nb4(i)){const id=S.occ[j];if(!id)continue;const t=S.b[id];const td=t&&B[t.type];
-      if(td&&td.store&&td.store.includes(r)&&td.cap-used(t)>0)return id;}return 0;});
-    if(f&&(!best||f.path.length<best.path.length))best=f;}
+  const best=findDepot(S,acc,r);
   if(!best){if(!b.stuck){b.stuck=true;staff();}b.status=(r==='ble'||r==='porc')?"Grenier plein ou non relié : les ouvriers sont envoyés ailleurs":"Entrepôt plein ou non relié : les ouvriers sont envoyés ailleurs";return;}
   if(b.stuck){b.stuck=false;staff();}
   spawn({k:'cart',home:b.id,target:best.val,res:r,amt:b.hold,path:best.path});
