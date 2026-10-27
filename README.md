@@ -27,6 +27,14 @@ src/
     state.ts          type de l'état d'une partie (GameState) et de ses grilles
     save.ts           sauvegarde versionnée, encodage compact, migrations
     storage.ts        où la sauvegarde est rangée (navigateur, mémoire pour les tests)
+  world/              génération de l'île, fonction pure de la graine
+    generate.ts       enchaîne les étapes et renvoie l'île complète (World)
+    island.ts         forme de l'île, forêts, rochers, landes
+    relief.ts         altitude et adoucissement des pentes
+    port.ts           emplacement du port, quai, route de départ
+    landmarks.ts      grand menhir, dolmen, chêne des anciens
+    terrain.ts        codes de terrain, profondeur de la mer, distance à la côte
+    noise.ts          bruit de valeur lissé
   data/               ce qui se règle sans toucher à la logique
     buildings.ts      définition des bâtiments et de la barre d'outils
     resources.ts      ressources et prix
@@ -62,11 +70,13 @@ Fait :
 - données et réglages extraits dans `src/data` et `src/core/constants.ts` ;
 - grille hexagonale et hasard extraits dans `src/core`, avec leurs premiers tests ;
 - styles séparés de la page, construction en fichier unique avec Vite ;
-- état typé, sauvegarde versionnée avec migrations, stockage interchangeable, hasard reproductible (`core/state.ts`, `save.ts`, `storage.ts`).
+- état typé, sauvegarde versionnée avec migrations, stockage interchangeable, hasard reproductible (`core/state.ts`, `save.ts`, `storage.ts`) ;
+- génération de l'île typée et testée dans `world/` ; la grille hexagonale `core/hex.ts` est typée.
+
+L'ordre des tirages au hasard dans `world/generate.ts` fixe la forme des îles : le modifier change l'île obtenue pour une graine donnée.
 
 À venir, dans cet ordre, chaque étape gardant le jeu jouable :
-1. `world/` : génération de l'île, du relief, du port et des sites anciens ;
-2. `sim/` : emplois, production, marcheurs, maisons, tribut, commerce, dieux, défense ;
-3. `render/` : projection, caches, kit de dessin, terrain, décors, bâtiments, effets ;
-4. `ui/` : panneaux, barre d'outils, entrées ;
-5. retrait des `@ts-nocheck` et passage progressif en TypeScript strict.
+1. `sim/` : emplois, production, marcheurs, maisons, tribut, commerce, dieux, défense ;
+2. `render/` : projection, caches, kit de dessin, terrain, décors, bâtiments, effets ;
+3. `ui/` : panneaux, barre d'outils, entrées ;
+4. retrait des `@ts-nocheck` et passage progressif en TypeScript strict.

@@ -3,7 +3,9 @@ import { N, MONTH, WS, MAXSTEP, BAL } from '../core/constants';
 import { rng, hashS, nextRandom } from '../core/rng';
 import { serialize, deserialize } from '../core/save';
 import { localStore } from '../core/storage';
-import { idx, X, Y, inb, SQ3, HR, HX, HY, cube, fromCube, hdist, DIRS, nbDir, NBC, nb4, EDGE_DIR, corner, foot, hexRound, within } from '../core/hex';
+import { idx, X, Y, inb, SQ3, HR, HX, HY, cube, fromCube, hdist, DIRS, nbDir, NBC, nb4, EDGE_DIR, corner, foot, hexRound, within, hexLine } from '../core/hex';
+import { generateWorld } from '../world/generate';
+import { seaDepth, landDistance } from '../world/terrain';
 import { MONTHS } from '../data/calendar';
 import { RES } from '../data/resources';
 import { LV } from '../data/houses';
@@ -59,9 +61,7 @@ const ENTRY=()=>S&&S.entry!=null?S.entry:idx(0,24);
 
 let DEP=new Uint8Array(N*N);
 let LD=new Uint8Array(N*N);
-function computeLD(){LD=new Uint8Array(N*N).fill(99);const q=[];for(let i=0;i<N*N;i++)if(S.ter[i]===2){LD[i]=0;q.push(i);}for(let h=0;h<q.length;h++){const i=q[h];for(const j of nb4(i))if(LD[j]===99){LD[j]=Math.min(98,LD[i]+1);q.push(j);}}}
-function computeDep(){computeLD();DEP=new Uint8Array(N*N);const q=[];for(let i=0;i<N*N;i++)if(S.ter[i]===2&&nb4(i).some(j=>S.ter[j]!==2)){DEP[i]=1;q.push(i);}
-  for(let h=0;h<q.length;h++){const i=q[h];for(const j of nb4(i))if(S.ter[j]===2&&!DEP[j]){DEP[j]=Math.min(9,DEP[i]+1);q.push(j);}}for(let i=0;i<N*N;i++)if(S.ter[i]===2&&!DEP[i])DEP[i]=9;}
+function computeDep(){LD=landDistance(S.ter);DEP=seaDepth(S.ter);}
 const VIS={};function resetVis(){for(const k of['market','druid','bard','tax'])VIS[k]=new Int32Array(N*N).fill(-1e9);}resetVis();
 function markVis(w){const k=w.k==='priest'?'druid':w.k;if(VIS[k])VIS[k][w.cur]=S.tick;}
 
@@ -71,59 +71,15 @@ const store=localStore('oppidum-save',['oppidum-v2']);
 
 /* ---------- carte ---------- */
 function newGame(seed){
-  const r=rng(seed);
-  const grid=sz=>{const a=[];for(let i=0;i<(sz+1)*(sz+1);i++)a.push(r());return a;};
-  const sm=t=>t*t*(3-2*t);
-  const noise=(a,sz,x,y)=>{const fx=x/N*sz,fy=y/N*sz,ix=Math.floor(fx),iy=Math.floor(fy),u=sm(fx-ix),v=sm(fy-iy),w=sz+1;
-    return a[iy*w+ix]*(1-u)*(1-v)+a[iy*w+ix+1]*u*(1-v)+a[(iy+1)*w+ix]*(1-u)*v+a[(iy+1)*w+ix+1]*u*v;};
-  const n1=grid(6),n2=grid(5),n6=grid(5),n7=grid(9);
-  const ter=new Uint8Array(N*N), vr=new Float32Array(N*N);
-  const CXI=N/2,CYI=N*.866/2;
-  const isl=new Float32Array(N*N);
-  for(let y=0;y<N;y++)for(let x=0;x<N;x++){
-    const i=idx(x,y),dx=(HX(i)-CXI)/(N*.5),dy=(HY(i)-CYI)/(N*.866*.5),d=Math.hypot(dx,dy);
-    const m=1.05-d*1.12+(noise(n6,5,x,y)-.5)*.62+(noise(n7,9,x,y)-.5)*.22;isl[i]=m;
-    const f=noise(n1,6,x,y)+(r()-.5)*.1, k=noise(n2,5,x,y);
-    const edge=Math.min(x,y,N-1-x,N-1-y);ter[i]=(m<.18||edge<4)?2:(f>.63?1:(k>.84?3:0)); vr[i]=r();
-  }
-  // on ne garde que l'île principale, les autres terres deviennent des îlots rocheux ou boisés
-  {const seen=new Int32Array(N*N).fill(-1);let best=-1,bs=0;
-    for(let i=0;i<N*N;i++){if(ter[i]===2||seen[i]>=0)continue;const q=[i];seen[i]=i;for(let h=0;h<q.length;h++)for(const j of nb4(q[h]))if(ter[j]!==2&&seen[j]<0){seen[j]=i;q.push(j);}
-      if(q.length>bs){bs=q.length;best=i;}}
-    for(let i=0;i<N*N;i++)if(ter[i]!==2&&seen[i]!==best&&r()<.5)ter[i]=r()<.5?3:1;}
-  const lnd=new Uint8Array(N*N),n4=grid(5);
-  for(let i=0;i<N*N;i++){if(ter[i]!==0)continue;const x=X(i),y=Y(i);
-    if(noise(n4,5,x,y)>.66||(isl[i]<.42&&r()<.6))lnd[i]=1;}
-  // emplacement du port : une côte bien en vue, au sud-ouest de l'île
-  let port=-1,ps=-1e9;
-  for(let i=0;i<N*N;i++){if(ter[i]===2)continue;const ft=foot(2,X(i),Y(i));if(!ft||ft.some(t=>ter[t]===2))continue;
-    const wet=ft.some(t=>nb4(t).some(j=>ter[j]===2));if(!wet)continue;
-    const dx=HX(i)-CXI,dy=HY(i)-CYI,sc=dy*.9-dx*.5-Math.abs(Math.hypot(dx,dy)-N*.3)*.2+r()*2;if(sc>ps){ps=sc;port=i;}}
-  if(port>=0)within(port,5,j=>{if(ter[j]!==2){ter[j]=0;lnd[j]=0;}});
-  const n5=grid(4),hgt=new Uint8Array(N*N);
-  for(let i=0;i<N*N;i++){if(ter[i]===2)continue;const x=X(i),y=Y(i);
-    let h=noise(n5,4,x,y)*4.5+(isl[i]-.2)*7+(ter[i]===3?2.5:0)+(ter[i]===1?.8:0)-1.4;
-    if(nb4(i).some(j=>ter[j]===2)&&r()<.4)h=Math.max(h,3);
-    if(port>=0&&hdist(i,port)<=6)h=Math.min(h,1+hdist(i,port)*.35);
-    hgt[i]=Math.max(0,Math.min(7,Math.round(h)));}
-  for(let it=0;it<8;it++)for(let i=0;i<N*N;i++){if(ter[i]===2)continue;let m=9;for(const j of nb4(i))if(ter[j]!==2)m=Math.min(m,hgt[j]);if(hgt[i]>m+1)hgt[i]=m+1;}
-  S={seed,rs:(seed|0)^0x5bd1e995,ter,vr,lnd,hgt,road:new Uint8Array(N*N),occ:new Int32Array(N*N),b:{},nid:1,w:[],money:1500,tick:0,mi:0,
+  const wd=generateWorld(seed);
+  S={seed,rs:(seed|0)^0x5bd1e995,ter:wd.ter,vr:wd.vr,lnd:wd.lnd,hgt:wd.hgt,road:new Uint8Array(N*N),occ:new Int32Array(N*N),b:{},nid:1,w:[],money:1500,tick:0,mi:0,
      favor:50,logs:[],sell:{bois:false,fer:false,cervoise:false,torques:false,ble:false,porc:false},
-     won:false,flags:{},eff:0,labor:0,jobs:0,pop:0,unemp:0,taxM:0,lastTaxM:0,hungry:0,tradeOK:false,lastBal:0,wall:new Uint8Array(N*N),whp:new Float32Array(N*N),u:[],gf:{taranis:35,belenos:35,epona:35},raidNext:30,raid:0};FE=null;FW=null;FX.length=0;
-  resetVis();computeDep();
-  let focus=idx(N>>1,N>>1);
-  if(port>=0&&place('port',X(port),Y(port))){const pb=S.b[S.occ[port]];
-    let wt=-1;for(const t of tilesOf(pb))for(const j of nb4(t))if(S.ter[j]===2&&(wt<0||DEP[j]>DEP[wt]))wt=j;S.dock=wt;
-    let st=-1,bd=1e9;for(const t of tilesOf(pb))for(const j of nb4(t))if(S.ter[j]!==2&&!S.occ[j]){const d=Math.hypot(HX(j)-CXI,HY(j)-CYI);if(d<bd){bd=d;st=j;}}
-    if(st>=0){const dx=CXI-HX(st),dy=CYI-HY(st),n=Math.hypot(dx,dy)||1,tx=HX(st)+dx/n*6,ty=HY(st)+dy/n*6,rf=ty/.866,[q,rr]=hexRound(tx-rf/2,rf),tg=fromCube(q,rr);
-      for(const j of roadLine(st,tg>=0?tg:st)){if(S.ter[j]===2||S.occ[j])break;S.ter[j]=0;S.road[j]=1;}S.entry=st;focus=st;}
-    S.hver=(S.hver||0)+1;S.money=1500;}
-  S.deco=new Uint8Array(N*N);const sites=[];
-  const ok=i=>S.ter[i]===0&&!S.road[i]&&!S.occ[i]&&nb4(i).length===6&&nb4(i).every(j=>S.ter[j]!==2)&&hdist(i,focus)>=7&&sites.every(o=>hdist(o,i)>=6);
-  for(const[t,sc]of[[1,i=>(S.hgt[i]||0)*3],[2,i=>(S.lnd[i]?4:0)+(S.hgt[i]||0)],[3,i=>nb4(i).filter(j=>S.ter[j]===1).length*2]]){
-    let best=-1,bs=-1e9;for(let i=0;i<N*N;i++){if(!ok(i))continue;const v=sc(i)+r()*2;if(v>bs){bs=v;best=i;}}if(best>=0){S.deco[best]=t;sites.push(best);}}
+     won:false,flags:{},eff:0,labor:0,jobs:0,pop:0,unemp:0,taxM:0,lastTaxM:0,hungry:0,tradeOK:false,lastBal:0,wall:new Uint8Array(N*N),whp:new Float32Array(N*N),u:[],gf:{taranis:35,belenos:35,epona:35},raidNext:30,raid:0,deco:new Uint8Array(N*N)};
+  FE=null;FW=null;FX.length=0;resetVis();computeDep();
+  if(wd.port&&!place('port',wd.port.x,wd.port.y))console.warn('Le port prévu n\'a pas pu être posé.');
+  S.road=wd.road;S.deco=wd.deco;S.dock=wd.dock;if(wd.entry>=0)S.entry=wd.entry;S.money=1500;S.hver=(S.hver||0)+1;computeDep();
   log("Votre clan vénète vient de débarquer sur l'île. Prolongez la route qui part du port, posez des huttes de part et d'autre et un puits.");
-  const [cx,cy]=W(HX(focus),HY(focus)); cam.x=cx; cam.y=cy; cam.z=1.1;
+  const [cx,cy]=W(HX(wd.focus),HY(wd.focus)); cam.x=cx; cam.y=cy; cam.z=1.1;
 }
 
 /* ---------- utilitaires ---------- */
@@ -398,7 +354,7 @@ function ser(){return serialize(S,cam);}
 function load(str){const r=deserialize(str);if(!r.ok){console.warn('Sauvegarde ignorée :',r.reason);return false;}
   const o=r.state;
   /* relief absent des plus anciennes sauvegardes : on le recalcule depuis la graine, aplani sous les bâtiments */
-  if(r.missing.includes('hgt')){const keep=S;newGame(o.seed);o.hgt=S.hgt;S=keep;for(const b of Object.values(o.b)){const f=foot(b.s,b.x,b.y)||[];const h0=o.hgt[idx(b.x,b.y)];for(const t of f)o.hgt[t]=h0;}}
+  if(r.missing.includes('hgt')){o.hgt=generateWorld(o.seed).hgt;for(const b of Object.values(o.b)){const f=foot(b.s,b.x,b.y)||[];const h0=o.hgt[idx(b.x,b.y)];for(const t of f)o.hgt[t]=h0;}}
   S=o;computeDep();for(const b of blds())if(b.hp==null){b.maxhp=b.hp=40*b.s*b.s;}FE=null;FW=null;resetVis();if(r.cam)cam=r.cam;
   if(r.migratedFrom)log(`Partie reprise depuis une sauvegarde au format ${r.migratedFrom}, mise à jour automatiquement.`);
   return true;}
@@ -1146,8 +1102,7 @@ function renderViews(){const k=ovKind();const key=k+'|'+view;if(key===lastOv)ret
   const n=$('viewNote');if(!k){n.hidden=true;return;}const o=OV[k];n.hidden=false;
   n.innerHTML=`<b>Vue ${o.n.toLowerCase()}</b> · ${o.d}${k!=='water'?' Contour : zone que le marcheur du bâtiment sélectionné peut atteindre.':''}<br><span class="dot" style="background:#86b86a"></span>${o.ok} · <span class="dot" style="background:#de6a4e"></span>maison qui en manque`;}
 document.querySelectorAll('.vb button').forEach(b=>b.onclick=()=>{view=b.dataset.v;lastOv='';});
-function roadLine(a,b){const A=cube(a),C=cube(b),n=hdist(a,b),out=[];
-  for(let k=0;k<=n;k++){const t=n?k/n:0;const[q,r]=hexRound(A[0]+(C[0]-A[0])*t+1e-6,A[1]+(C[1]-A[1])*t+1e-6);const j=fromCube(q,r);if(j>=0&&!out.includes(j))out.push(j);}return out;}
+const roadLine=hexLine;
 
 /* ---------- entrées ---------- */
 function resize(){const r=$('view').getBoundingClientRect();dpr=window.devicePixelRatio||1;cw=r.width;ch=r.height;cv.width=Math.max(1,cw*dpr|0);cv.height=Math.max(1,ch*dpr|0);}
