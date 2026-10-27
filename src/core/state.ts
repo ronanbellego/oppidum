@@ -113,6 +113,7 @@ export interface Walker {
   dead?: boolean;
 }
 
+/** Combattant libre de ses mouvements (hors chemins) : pillard ou guerrier du clan. */
 export interface Unit {
   k: 'enemy' | 'warrior';
   cur: number;
@@ -120,7 +121,24 @@ export interface Unit {
   t: number;
   hp: number;
   max: number;
-  [extra: string]: unknown;
+  /** Caserne d'origine d'un guerrier. */
+  home: number;
+  /** Position dans le plan, tenue à jour pour les distances et l'affichage. */
+  px: number;
+  py: number;
+  /** Petit décalage d'un guerrier au repos, pour qu'ils ne se superposent pas. */
+  ox: number;
+  oy: number;
+  /** Cible du pillard : bâtiment ou case de rempart attaqués. */
+  bT?: number;
+  wallT?: number | null;
+  /** Pas passés à piller le port. */
+  pill?: number;
+  fled?: number;
+  /** Trajet de retour d'un guerrier. */
+  path?: number[] | null;
+  pi?: number;
+  dead?: boolean;
 }
 
 export interface LogEntry {

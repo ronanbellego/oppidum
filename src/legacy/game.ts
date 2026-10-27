@@ -15,6 +15,8 @@ import { spawnWalker, killWalker, stepWalker } from '../sim/walkers';
 import { immigrate as immigrateS } from '../sim/migration';
 import { toutatisMonth, templesMonth, festival } from '../sim/gods';
 import { tradeMonth } from '../sim/trade';
+import { fields, resetFields, spawnUnit as spawnUnitS, stepUnits as stepUnitsS, startRaid as startRaidS, raidMonth, buildWall as buildWallS, defenseStep, repairWalls, passE as passES } from '../sim/defense';
+import { monumentStep, progress } from '../sim/monuments';
 import { nearTerrain } from '../sim/query';
 import { taxRate as taxRateOf, accrueTax, collectTax, monthlyTaxDue, taxPending } from '../sim/tax';
 import { seaDepth, landDistance } from '../world/terrain';
@@ -87,7 +89,7 @@ function newGame(seed){
   S={seed,rs:(seed|0)^0x5bd1e995,ter:wd.ter,vr:wd.vr,lnd:wd.lnd,hgt:wd.hgt,road:new Uint8Array(N*N),occ:new Int32Array(N*N),b:{},nid:1,w:[],money:1500,tick:0,mi:0,
      favor:50,logs:[],sell:{bois:false,fer:false,cervoise:false,torques:false,ble:false,porc:false},
      won:false,flags:{},eff:0,labor:0,jobs:0,pop:0,unemp:0,taxM:0,lastTaxM:0,hungry:0,tradeOK:false,lastBal:0,wall:new Uint8Array(N*N),whp:new Float32Array(N*N),u:[],gf:{taranis:35,belenos:35,epona:35},raidNext:30,raid:0,deco:new Uint8Array(N*N)};
-  FE=null;FW=null;FX.length=0;resetVis();computeDep();
+  resetFields();FX.length=0;resetVis();computeDep();
   if(wd.port&&!place('port',wd.port.x,wd.port.y))console.warn('Le port prévu n\'a pas pu être posé.');
   S.road=wd.road;S.deco=wd.deco;S.dock=wd.dock;if(wd.entry>=0)S.entry=wd.entry;S.money=1500;S.hver=(S.hver||0)+1;computeDep();
   log("Votre clan vénète vient de débarquer sur l'île. Prolongez la route qui part du port, posez des huttes de part et d'autre et un puits.");
@@ -132,7 +134,7 @@ function place(type,x,y){
   const d=B[type];S.money-=d.cost;
   const b={id:S.nid++,type,x,y,s:d.s,prog:0,hold:0,cartOut:false,out:false,cool:8,loaded:false,status:'',stock:{}};
   if(type==='hut')Object.assign(b,{pop:0,inc:0,lvl:1,food:{ble:0,porc:0},cerv:0,torq:0,relig:-99,ent:-99,lastTax:-1,bad:0,hungry:0,has:{}});
-  b.maxhp=b.hp=40*d.s*d.s;if(d.mon){b.got={};b.done=false;b.cool=5;}FE=null;
+  b.maxhp=b.hp=40*d.s*d.s;if(d.mon){b.got={};b.done=false;b.cool=5;}fields.fe=null;
   S.b[b.id]=b;const h0=S.hgt?S.hgt[idx(x,y)]:0;for(const t of tilesOf(b)){S.occ[t]=b.id;if(S.hgt)S.hgt[t]=h0;}S.hver=(S.hver||0)+1;
   if(type==='granary'&&!S.flags.g1){S.flags.g1=1;b.stock.ble=80;log("Le clan dépose ses provisions au premier grenier : 80 blé.");}
   staff();dirtyLabor=true;
@@ -149,9 +151,9 @@ function buildRoad(list){
 function demolishRect(a,c){S.hver=(S.hver||0)+1;
   const x0=Math.min(X(a),X(c)),x1=Math.max(X(a),X(c)),y0=Math.min(Y(a),Y(c)),y1=Math.max(Y(a),Y(c));
   for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const i=idx(x,y);
-    if(S.occ[i])removeB(S.occ[i]);else if(S.wall[i]){S.wall[i]=0;FE=null;}else if(S.road[i]&&i!==ENTRY())S.road[i]=0;}
+    if(S.occ[i])removeB(S.occ[i]);else if(S.wall[i]){S.wall[i]=0;fields.fe=null;}else if(S.road[i]&&i!==ENTRY())S.road[i]=0;}
 }
-function removeB(id){const b=S.b[id];if(!b||b.type==='port')return;FE=null;for(const t of tilesOf(b))S.occ[t]=0;delete S.b[id];
+function removeB(id){const b=S.b[id];if(!b||b.type==='port')return;fields.fe=null;for(const t of tilesOf(b))S.occ[t]=0;delete S.b[id];
   for(const w of S.w)if(w.home===id||w.target===id)kill(w);if(sel===id)sel=null;}
 
 /* ---------- marcheurs ---------- */
@@ -166,7 +168,7 @@ function stepSim(){
   for(const b of blds())updB(b);
   for(const w of S.w)if(!w.dead)stepW(w);
   stepUnits();
-  if(S.tick%50===0&&!S.raid)for(let i=0;i<N*N;i++)if(S.wall[i]&&S.whp[i]<100)S.whp[i]=Math.min(100,S.whp[i]+5);
+  if(S.tick%50===0)repairWalls(S);
   S.w=S.w.filter(w=>!w.dead);
   if(S.tick%10===0)staff();
   if(S.tick%15===0)immigrate();
@@ -252,7 +254,7 @@ function load(str){const r=deserialize(str);if(!r.ok){console.warn('Sauvegarde i
   const o=r.state;
   /* relief absent des plus anciennes sauvegardes : on le recalcule depuis la graine, aplani sous les bâtiments */
   if(r.missing.includes('hgt')){o.hgt=generateWorld(o.seed).hgt;for(const b of Object.values(o.b)){const f=foot(b.s,b.x,b.y)||[];const h0=o.hgt[idx(b.x,b.y)];for(const t of f)o.hgt[t]=h0;}}
-  S=o;computeDep();for(const b of blds())if(b.hp==null){b.maxhp=b.hp=40*b.s*b.s;}FE=null;FW=null;resetVis();if(r.cam)cam=r.cam;
+  S=o;computeDep();for(const b of blds())if(b.hp==null){b.maxhp=b.hp=40*b.s*b.s;}resetFields();resetVis();if(r.cam)cam=r.cam;
   if(r.migratedFrom)log(`Partie reprise depuis une sauvegarde au format ${r.migratedFrom}, mise à jour automatiquement.`);
   return true;}
 function save(){store.write(ser());}
@@ -324,123 +326,20 @@ function cartFig(px,py,ph,res){
   figure(px-4,py,ph,'#7b5a38','cart');
 }
 
-/* ---------- défense : remparts, unités, raids ---------- */
-let FE=null,FW=null;const FX=[];
-const ESP=.075,WSP=.1;
+/* ---------- défense : remparts, unités, raids (voir sim/defense.ts) ---------- */
+const FX=[];
+/* ce que la simulation demande au jeu : hasard, chronique, effets, retrait d'un bâtiment */
+const CTX={rand:()=>R(),log:m=>log(m),toast:m=>toast(m),fx:e=>FX.push(e),removeBuilding:id=>removeB(id),onVisit:w=>markVis(w)};
 function monDone(t){return monumentDone(S,t);}
-function monProg(b){const d=B[b.type].mon;let a=0,n=0;for(const r in d){n+=d[r];a+=Math.min(d[r],(b.got&&b.got[r])||0);}return n?a/n:1;}
-function passE(i){const t=S.ter[i];if(t===3||S.occ[i])return false;if(t===2&&!S.road[i])return false;return true;}
-function passW(i){return passE(i)&&S.wall[i]!==1;}
-function field(src,cost){const D=new Float32Array(N*N).fill(1e9);const bk=[];const push=(i,d)=>{(bk[d]||(bk[d]=[])).push(i);};
-  for(const s of src){if(D[s]>0){D[s]=0;push(s,0);}}
-  for(let d=0;d<bk.length;d++){const q=bk[d];if(!q)continue;for(let k=0;k<q.length;k++){const i=q[k];if(D[i]!==d)continue;
-    for(const j of nb4(i)){const c=cost(j);if(c<0)continue;const nd=d+c;if(nd<D[j]){D[j]=nd;push(j,nd);}}}}
-  return D;}
-function enemyField(){const src=[];for(const b of blds())for(const t of tilesOf(b))for(const j of nb4(t))if(passE(j)&&!S.wall[j])src.push(j);
-  return field(src,j=>passE(j)?(S.wall[j]?12:S.ter[j]===1?2:1):-1);}
-function warriorField(){const src=S.u.filter(u=>u.k==='enemy').map(u=>u.cur);return field(src,j=>passW(j)?(S.ter[j]===1?2:1):-1);}
-function gridPath(start,goal){const prev=new Int32Array(N*N).fill(-2);prev[start]=-1;const q=[start];let h=0;
-  while(h<q.length){const i=q[h++];if(goal(i)){const p=[];let k=i;while(k!==-1){p.push(k);k=prev[k];}return p.reverse();}
-    for(const j of nb4(i))if(prev[j]===-2&&passW(j)){prev[j]=i;q.push(j);}}return null;}
-function spawnUnit(k,i,home){const heroes=monDone('heroes');const max=k==='enemy'?24:(heroes?40:30);
-  const u={k,cur:i,nxt:i,t:0,hp:max,max,home:home||0,ox:(R()-.5)*.5,oy:(R()-.5)*.5};upos(u);S.u.push(u);return u;}
-function upos(u){u.px=HX(u.cur)+(HX(u.nxt)-HX(u.cur))*u.t;u.py=HY(u.cur)+(HY(u.nxt)-HY(u.cur))*u.t;}
-function nearest(k,u,r){let best=null,bd=r;for(const v of S.u){if(v.k!==k||v.dead)continue;const d=Math.hypot(v.px-u.px,v.py-u.py);if(d<bd){bd=d;best=v;}}return best;}
-function hurt(u,d){if(u.dead)return;u.hp-=d;if(u.hp<=0){u.dead=true;if(u.k==='enemy')S.loot=(S.loot||0)+8;else S.fallen=(S.fallen||0)+1;}}
-function wDmg(){return .45*(monDone('heroes')?1.5:1)*(.8+.4*S.favor/100);}
-const EDMG=.35;
-function stepEnemy(u){
-  const foe=nearest('warrior',u,1.05);if(foe){hurt(foe,EDMG);return;}
-  if(u.nxt===u.cur){
-    if(u.bT){const b=S.b[u.bT];if(b){b.hp-=EDMG;if(b.type==='port'){b.hp=Math.max(5,b.hp);u.pill=(u.pill||0)+1;if(u.pill>180){const l=Math.min(Math.floor(S.money),25);S.money-=l;u.dead=true;u.fled=1;if(!S.flags.pillMsg){S.flags.pillMsg=1;log(`Des pillards ont mis le port à sac et repris la mer avec ${l} statères.`);}}return;}if(b.hp<=0){{const[fx,fy]=bc(b);FX.push({k:'fire',x:fx,y:fy,t:90});}log(`Les pillards ont incendié : ${B[b.type].n.toLowerCase()}.`);removeB(b.id);FE=null;u.bT=0;}return;}u.bT=0;}
-    if(u.wallT!=null){if(S.wall[u.wallT]){S.whp[u.wallT]-=EDMG*1.4;if(S.whp[u.wallT]<=0){const g2=S.wall[u.wallT]===2;S.wall[u.wallT]=0;FE=null;if(!S.breach){S.breach=1;log(g2?"Les pillards ont enfoncé une porte !":"Les pillards ont ouvert une brèche dans le rempart !");}}return;}u.wallT=null;}
-    if(!FE)FE=enemyField();
-    const i=u.cur;
-    for(const j of nb4(i)){const id=S.occ[j];if(id&&S.b[id]){u.bT=id;return;}}
-    let best=-1,bd=FE[i];for(const j of nb4(i)){if(!passE(j))continue;if(FE[j]<bd){bd=FE[j];best=j;}}
-    if(best<0)return;
-    if(S.wall[best]){u.wallT=best;return;}
-    u.nxt=best;
-  }
-  u.t+=ESP*(S.ter[u.nxt]===1?.6:1);if(u.t>=1){u.cur=u.nxt;u.t=0;}
-}
-function stepWarrior(u){
-  const foe=nearest('enemy',u,1.05);if(foe){hurt(foe,wDmg());return;}
-  const raid=S.u.some(v=>v.k==='enemy');
-  if(!raid&&u.hp<u.max)u.hp=Math.min(u.max,u.hp+.04);
-  if(u.nxt===u.cur){
-    if(raid){u.path=null;if(!FW)FW=warriorField();const i=u.cur;let best=-1,bd=FW[i];
-      for(const j of nb4(i)){if(!passW(j))continue;if(FW[j]<bd){bd=FW[j];best=j;}}if(best<0)return;u.nxt=best;}
-    else{
-      const h=S.b[u.home];if(!h)return;
-      if(!u.path){const acc=access(h);if(!acc.length||acc.includes(u.cur)||hdist(u.cur,idx(h.x,h.y))<=2)return;
-        u.path=gridPath(u.cur,i=>acc.includes(i));u.pi=0;if(!u.path)return;}
-      u.pi++;if(u.pi>=u.path.length){u.path=null;return;}const j=u.path[u.pi];if(!passW(j)){u.path=null;return;}u.nxt=j;}
-  }
-  u.t+=WSP*(S.ter[u.nxt]===1?.6:1);if(u.t>=1){u.cur=u.nxt;u.t=0;}
-}
-function stepUnits(){
-  if(!S.u.length&&!FX.length)return;
-  const anyE=S.u.some(u=>u.k==='enemy');
-  if(anyE){if(S.tick%20===0)FE=null;if(S.tick%12===0)FW=null;}
-  for(const u of S.u){if(u.dead)continue;if(u.k==='enemy')stepEnemy(u);else stepWarrior(u);upos(u);}
-  if(anyE&&S.gf&&S.gf.taranis>60&&S.tick%40===0){const es=S.u.filter(u=>u.k==='enemy'&&!u.dead);if(es.length){const e=es[(R()*es.length)|0];hurt(e,20);FX.push({k:'bolt',x:e.px,y:e.py,t:12});}}
-  S.u=S.u.filter(u=>!u.dead);
-  for(const f of FX)f.t--;for(let k=FX.length-1;k>=0;k--)if(FX[k].t<=0)FX.splice(k,1);
-  if(S.raid&&!S.u.some(u=>u.k==='enemy')){S.flags.pillMsg=0;S.raid=0;const l=S.loot||0;S.money+=l;S.loot=0;S.flags.raidWon=1;S.breach=0;FW=null;
-    log(`Les pillards sont repoussés.${l?` Leurs armes et leurs bijoux rapportent ${l} statères.`:''}${S.fallen?` ${S.fallen} guerrier(s) sont tombés.`:''}`);S.fallen=0;toast("Raid repoussé");}
-}
-function raidSource(){FE=enemyField();const c=[];const pi=S.entry!=null?S.entry:-1;
-  for(let i=0;i<N*N;i++){if(S.ter[i]===2||!passE(i)||FE[i]>=1e8)continue;if(!nb4(i).some(j=>S.ter[j]===2&&!S.road[j]))continue;if(pi>=0&&hdist(i,pi)<10)continue;c.push(i);}
-  if(!c.length)for(let k=0;k<N;k++)for(const i of[idx(k,0),idx(k,N-1),idx(0,k),idx(N-1,k)])if(FE[i]<1e8&&i!==ENTRY()&&!c.includes(i))c.push(i);
-  return c;}
-function sideOf(i){const d=(Math.atan2(HY(i)-N*.433,HX(i)-N/2)*180/Math.PI+360)%360;return d<45||d>=315?"l'est":d<135?'le sud':d<225?"l'ouest":'le nord';}
-function startRaid(){
-  const c=raidSource();if(!c.length)return false;
-  let s=S.raidFrom!=null&&c.includes(S.raidFrom)?S.raidFrom:c[(R()*c.length)|0];
-  c.sort((a,b)=>hdist(a,s)-hdist(b,s));
-  const n=Math.min(14,3+Math.floor(S.pop/30));
-  for(let k=0;k<n;k++)spawnUnit('enemy',c[k%Math.min(c.length,5)]);
-  S.raid=1;S.breach=0;S.fallen=0;
-  {const wj=nb4(s).find(j=>S.ter[j]===2);if(wj!=null)FX.push({k:'raider',d:wj,t:420});}
-  log(`${n} pillards débarquent sur la côte, par ${sideOf(s)} de l'île. Aux armes !`);toast("Les pillards attaquent !");return true;
-}
-function raidMonthly(){
-  if(S.raids===false||S.pop<BAL.raidMinPop)return;
-  if(S.raidNext==null)S.raidNext=S.mi+12;
-  if(!S.raidWarn&&S.mi>=S.raidNext-1&&!S.raid){const c=raidSource();if(c.length){S.raidFrom=c[(R()*c.length)|0];S.raidWarn=1;
-    log(`Les guetteurs aperçoivent des voiles pillardes au large, côté ${sideOf(S.raidFrom).replace(/^(le |l')/,'')}. Elles aborderont le mois prochain.`);}}
-  if(S.mi>=S.raidNext&&!S.raid){startRaid();S.raidNext=S.mi+16+((R()*8)|0);S.raidWarn=0;}
-}
-function buildWall(list){let blocked=false;
-  for(const i of list){if(S.occ[i]||S.wall[i]||(S.deco&&S.deco[i]))continue;const gate=!!S.road[i];const c=gate?15:6;
-    if(!gate&&S.ter[i]!==0){blocked=true;continue;}if(S.money<c){toast("Pas assez de statères");break;}
-    S.money-=c;S.wall[i]=gate?2:1;S.whp[i]=100;}
-  if(blocked)toast("Le rempart ne s'élève que sur la prairie ou sur un chemin");FE=null;}
-function stepDefB(b,acc,ef){
-  if(b.type==='tower'){if(ef<=0){b.status="Personne pour y travailler : il faut plus d'habitants";return;}
-    b.cool-=1;if(b.cool>0)return;b.cool=12;
-    const[cx,cy]=bc(b);let best=null,bd=4.5;for(const u of S.u){if(u.k!=='enemy'||u.dead)continue;const d=Math.hypot(u.px-cx,u.py-cy);if(d<bd){bd=d;best=u;}}
-    if(best){hurt(best,5*ef);FX.push({k:'arrow',x0:cx,y0:cy,x1:best.px,y1:best.py,t:6});b.status="Tire sur les pillards";}else b.status="Guette l'horizon";return;}
-  if(b.type==='barracks'){const mine=S.u.filter(u=>u.k==='warrior'&&u.home===b.id).length;
-    if(ef<=0){b.status=`${mine} guerrier(s) · personne pour les entraîner`;return;}
-    if(mine>=6){b.status="6 guerriers prêts au combat";return;}
-    if(stockOf('fer')<2){b.status=`${mine} guerrier(s) · en attente de fer à l'entrepôt`;return;}
-    b.status=`${mine} guerrier(s) · entraînement en cours`;b.prog+=ef;
-    if(b.prog>=80){b.prog=0;take('fer',2);spawnUnit('warrior',acc[(R()*acc.length)|0],b.id);if(!S.flags.w1){S.flags.w1=1;log("Le premier guerrier du clan a reçu ses armes.");}}return;}
-}
-function stepMon(b,ef){const d=B[b.type];
-  if(b.done){b.status="Achevé";return;}
-  if(ef<=0){b.status="Chantier à l'arrêt : il faut plus d'habitants";return;}
-  b.cool-=ef;if(b.cool>0)return;b.cool=5;
-  const miss=Object.keys(d.mon).filter(r=>(b.got[r]||0)<d.mon[r]);
-  if(!miss.length){b.done=true;b.hp=b.maxhp=400;log(MONMSG[b.type]);toast(B[b.type].n+" achevé");staff();return;}
-  const av=miss.filter(r=>stockOf(r)>=1);
-  if(!av.length){b.status="Chantier arrêté : il manque "+miss.map(r=>RES[r].n.toLowerCase()).join(', ')+" à l'entrepôt";return;}
-  const r=av[(R()*av.length)|0];take(r,1);b.got[r]=(b.got[r]||0)+1;b.status="Chantier en cours";}
-const MONMSG={menhirs:"L'alignement de menhirs est dressé. Les dieux contemplent l'oppidum avec bienveillance.",
-  tumulus:"Le tumulus royal est achevé. Les ancêtres veillent : le tribut rentre mieux et les familles affluent.",
-  heroes:"Le sanctuaire des héros est consacré. Les guerriers se battent désormais avec la force de leurs ancêtres."};
+function monProg(b){return progress(b);}
+function passE(i){return passES(S,i);}
+function spawnUnit(k,i,home){return spawnUnitS(S,k,i,CTX,home);}
+function stepUnits(){stepUnitsS(S,CTX);for(const f of FX)f.t--;for(let k=FX.length-1;k>=0;k--)if(FX[k].t<=0)FX.splice(k,1);}
+function startRaid(){return startRaidS(S,CTX);}
+function raidMonthly(){raidMonth(S,CTX);}
+function buildWall(list){buildWallS(S,list,CTX);}
+function stepDefB(b,acc,ef){defenseStep(S,b,acc,ef,CTX);}
+function stepMon(b,ef){monumentStep(S,b,ef,CTX);}
 function godsMonthly(){if(templesMonth(S,R))log("Bélénos fait mûrir les blés : 40 blé de plus au grenier.");}
 
 /* ---- art : défense, temples, monuments ---- */
