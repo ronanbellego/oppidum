@@ -1,0 +1,42 @@
+// @ts-nocheck — état de l'affichage et de l'interface (partie en cours, caméra, outil, sélection, caches).
+// Ces valeurs sont réassignées par plusieurs modules : elles vivent donc dans un objet partagé.
+import { N } from '../core/constants';
+import { ctx } from './dom';
+
+export const A = {
+  S: null,
+  cam: {x:0,y:0,z:1},
+  dpr: 1,
+  cw: 0,
+  ch: 0,
+  tool: 'inspect',
+  sel: null,
+  hover: -1,
+  drag: null,
+  speed: 1,
+  LOC: null,
+  DEP: new Uint8Array(N*N),
+  LD: new Uint8Array(N*N),
+  toastT: 0,
+  g: ctx,
+  GEO: [],
+  GEOS: null,
+  GEOV: -1,
+  CHK: {},
+  CHKV: -1,
+  CHKS: null,
+  reachC: {id:0,t:-99,set:null},
+  lastOv: '',
+  pinch: null,
+  down: null,
+  selTile: -1,
+  dirtySel: true,
+  dirtyLog: true,
+  dirtyObj: true,
+  dirtyLabor: true,
+  view: 'none',
+  confirmT: 0,
+  last: 0,
+  acc: 0,
+  uiT: 0,
+};

@@ -63,9 +63,27 @@ src/
     types.ts          types des définitions (bâtiments, niveaux de maison, ressources)
     calendar.ts       mois du calendrier de Coligny
     palette.ts        couleurs d'Armorique
-  legacy/game.ts      tout le reste, en attente de découpage (voir ci-dessous)
+  app/                ce qui relie la simulation à l'écran
+    dom.ts            canevas et accès aux éléments de la page
+    state.ts          état de l'affichage (caméra, outil, sélection, caches), partagé entre modules
+    game.ts           partie en cours, journal, messages, sauvegarde et chargement
+  render/             dessin : ne modifie jamais la partie
+    projection.ts     projection de la grille hexagonale à l'écran, profondeur
+    kit.ts            facettes, ombrage, trait de crayon, caches de sprites
+    terrain.ts        relief continu, mer, littoral, blocs de terrain en cache
+    decor.ts          forêts, rochers, lande, sites anciens
+    buildings.ts      bâtiments en facettes
+    units.ts          marcheurs, pillards, guerriers, navires, remparts
+    fx.ts             effets passagers (foudre, flammes, fumée)
+    overlays.ts       vues de couverture (eau, marché, culte, bardes, tribut)
+    renderer.ts       assemblage d'une image
+  ui/                 interface
+    panels.ts         barre du haut, fiches, panneau de droite, barre d'outils
+    input.ts          souris, tactile, clavier, caméra
+    loop.ts           boucle d'animation et démarrage
 tests/                tests Vitest
-tools/split.mjs       script qui a produit ce découpage à partir de la version mono-fichier
+tools/split.mjs       script qui a produit le premier découpage à partir de la version mono-fichier
+tools/split-render.mjs script qui a découpé l'affichage et l'interface
 tools/artifact.mjs    prépare la version construite pour la publication en artefact
 ```
 
@@ -93,11 +111,12 @@ Fait :
 - styles séparés de la page, construction en fichier unique avec Vite ;
 - état typé, sauvegarde versionnée avec migrations, stockage interchangeable, hasard reproductible (`core/state.ts`, `save.ts`, `storage.ts`) ;
 - génération de l'île typée et testée dans `world/` ; la grille hexagonale `core/hex.ts` est typée ;
-- `sim/` complet : toute la simulation (emplois, tribut, maisons, stocks, production, marcheurs, migrants, dieux, commerce, défense, monuments, construction, boucle) est typée, testée et tourne sans écran ; des parties de plusieurs années sont jouées dans les tests et vérifiées reproductibles, y compris après une sauvegarde ; définitions des bâtiments, maisons, ressources et priorités typées.
+- `sim/` complet : toute la simulation (emplois, tribut, maisons, stocks, production, marcheurs, migrants, dieux, commerce, défense, monuments, construction, boucle) est typée, testée et tourne sans écran ; des parties de plusieurs années sont jouées dans les tests et vérifiées reproductibles, y compris après une sauvegarde ; définitions des bâtiments, maisons, ressources et priorités typées ;
+- affichage et interface découpés en modules (`app/`, `render/`, `ui/`) ; le fichier mono-bloc a disparu.
 
 L'ordre des tirages au hasard dans `world/generate.ts` fixe la forme des îles : le modifier change l'île obtenue pour une graine donnée.
 
 À venir, dans cet ordre, chaque étape gardant le jeu jouable :
-1. `render/` : projection, caches, kit de dessin, terrain, décors, bâtiments, effets ;
-2. `ui/` : panneaux, barre d'outils, entrées ;
-3. retrait des `@ts-nocheck` et passage progressif en TypeScript strict.
+1. typer `render/` et `ui/` module par module, en retirant les `@ts-nocheck` ;
+2. réduire l'objet partagé `app/state.ts` : chaque cache rejoint le module qui l'utilise ;
+3. passer progressivement en TypeScript strict.
