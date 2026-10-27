@@ -8,9 +8,11 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "artifact": "vite build && node tools/artifact.mjs"
+    "artifact": "vite build && node tools/artifact.mjs",
+    "check": "tsc --noEmit && vitest run && vite build"
   },
   "devDependencies": {
+    "@types/node": "^20.17.6",
     "acorn": "^8.19.0",
     "acorn-walk": "^8.3.5",
     "typescript": "^5.6.3",

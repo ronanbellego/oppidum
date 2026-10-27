@@ -17,6 +17,10 @@ import { toutatisMonth, templesMonth, festival } from '../sim/gods';
 import { tradeMonth } from '../sim/trade';
 import { fields, resetFields, spawnUnit as spawnUnitS, stepUnits as stepUnitsS, startRaid as startRaidS, raidMonth, buildWall as buildWallS, defenseStep, repairWalls, passE as passES } from '../sim/defense';
 import { monumentStep, progress } from '../sim/monuments';
+import { simStep, dateLabel } from '../sim/tick';
+import { buildingStep } from '../sim/buildings';
+import { OBJECTIVES } from '../sim/objectives';
+import { canPlace as canPlaceS, placeBuilding, removeBuilding, roadCost as roadCostS, buildRoad as buildRoadS, demolishArea, createGame } from '../sim/construction';
 import { nearTerrain } from '../sim/query';
 import { taxRate as taxRateOf, accrueTax, collectTax, monthlyTaxDue, taxPending } from '../sim/tax';
 import { seaDepth, landDistance } from '../world/terrain';
@@ -86,19 +90,14 @@ const store=localStore('oppidum-save',['oppidum-v2']);
 /* ---------- carte ---------- */
 function newGame(seed){
   const wd=generateWorld(seed);
-  S={seed,rs:(seed|0)^0x5bd1e995,ter:wd.ter,vr:wd.vr,lnd:wd.lnd,hgt:wd.hgt,road:new Uint8Array(N*N),occ:new Int32Array(N*N),b:{},nid:1,w:[],money:1500,tick:0,mi:0,
-     favor:50,logs:[],sell:{bois:false,fer:false,cervoise:false,torques:false,ble:false,porc:false},
-     won:false,flags:{},eff:0,labor:0,jobs:0,pop:0,unemp:0,taxM:0,lastTaxM:0,hungry:0,tradeOK:false,lastBal:0,wall:new Uint8Array(N*N),whp:new Float32Array(N*N),u:[],gf:{taranis:35,belenos:35,epona:35},raidNext:30,raid:0,deco:new Uint8Array(N*N)};
-  resetFields();FX.length=0;resetVis();computeDep();
-  if(wd.port&&!place('port',wd.port.x,wd.port.y))console.warn('Le port prévu n\'a pas pu être posé.');
-  S.road=wd.road;S.deco=wd.deco;S.dock=wd.dock;if(wd.entry>=0)S.entry=wd.entry;S.money=1500;S.hver=(S.hver||0)+1;computeDep();
+  S=createGame(seed,wd);resetFields();FX.length=0;resetVis();computeDep();
   log("Votre clan vénète vient de débarquer sur l'île. Prolongez la route qui part du port, posez des huttes de part et d'autre et un puits.");
   const [cx,cy]=W(HX(wd.focus),HY(wd.focus)); cam.x=cx; cam.y=cy; cam.z=1.1;
 }
 
 /* ---------- utilitaires ---------- */
 function log(t){S.logs.unshift({m:dateTxt(),t}); if(S.logs.length>14)S.logs.length=14; dirtyLog=true;}
-function dateTxt(){const y=80-Math.floor(S.mi/12);return MONTHS[S.mi%12]+', '+(y>0?`an ${y} av. J.-C.`:`an ${1-y}`);}
+function dateTxt(){return dateLabel(S.mi);}
 let toastT=0;
 function toast(t){const el=$('toast');el.textContent=t;el.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>el.classList.remove('on'),2200);}
 const shc={};
@@ -116,100 +115,19 @@ function putAny(r,n){putAnyS(S,r,n);}
 function nearTer(b,t,r){return nearTerrain(S,b,t,r);}
 
 /* ---------- construction ---------- */
-function canPlace(type,x,y){
-  const d=B[type];
-  const ft=foot(d.s,x,y);if(!ft)return"Hors de la carte";
-  for(const k of ft){
-    if(S.occ[k]||S.road[k]||S.wall[k])return"Emplacement occupé";if(S.deco&&S.deco[k])return"Un monument des anciens occupe cette case";
-    if(S.ter[k]!==0)return S.ter[k]===2?"On ne bâtit pas sur l'eau":S.ter[k]===1?"Il faut d'abord défricher (un chemin coupe la forêt)":"Rochers impraticables";
-  }
-  const fake={x,y,s:d.s};
-  if(d.near==='forest'&&!nearTer(fake,1,2))return"Il faut une forêt à 2 cases";
-  if(d.near==='rock'&&!nearTer(fake,3,1))return"La mine doit toucher des rochers";
-  if(S.money<d.cost)return"Pas assez de statères";
-  return"";
-}
-function place(type,x,y){
-  const why=canPlace(type,x,y);if(why){toast(why);return false;}
-  const d=B[type];S.money-=d.cost;
-  const b={id:S.nid++,type,x,y,s:d.s,prog:0,hold:0,cartOut:false,out:false,cool:8,loaded:false,status:'',stock:{}};
-  if(type==='hut')Object.assign(b,{pop:0,inc:0,lvl:1,food:{ble:0,porc:0},cerv:0,torq:0,relig:-99,ent:-99,lastTax:-1,bad:0,hungry:0,has:{}});
-  b.maxhp=b.hp=40*d.s*d.s;if(d.mon){b.got={};b.done=false;b.cool=5;}fields.fe=null;
-  S.b[b.id]=b;const h0=S.hgt?S.hgt[idx(x,y)]:0;for(const t of tilesOf(b)){S.occ[t]=b.id;if(S.hgt)S.hgt[t]=h0;}S.hver=(S.hver||0)+1;
-  if(type==='granary'&&!S.flags.g1){S.flags.g1=1;b.stock.ble=80;log("Le clan dépose ses provisions au premier grenier : 80 blé.");}
-  staff();dirtyLabor=true;
-  return true;
-}
-function roadCost(i){const t=S.ter[i];return t===0?2:t===1?4:t===2?20:-1;}
-function buildRoad(list){
-  let spent=0,blocked=false;
-  for(const i of list){if(S.road[i]||S.occ[i]||S.wall[i]||(S.deco&&S.deco[i]))continue;const c=roadCost(i);if(c<0){blocked=true;continue;}
-    if(S.money<c){toast("Pas assez de statères");break;}S.money-=c;spent+=c;if(S.ter[i]===1)S.ter[i]=0;S.road[i]=1;}
-  S.hver=(S.hver||0)+1;
-  if(blocked)toast("Les rochers bloquent le chemin");
-}
-function demolishRect(a,c){S.hver=(S.hver||0)+1;
-  const x0=Math.min(X(a),X(c)),x1=Math.max(X(a),X(c)),y0=Math.min(Y(a),Y(c)),y1=Math.max(Y(a),Y(c));
-  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const i=idx(x,y);
-    if(S.occ[i])removeB(S.occ[i]);else if(S.wall[i]){S.wall[i]=0;fields.fe=null;}else if(S.road[i]&&i!==ENTRY())S.road[i]=0;}
-}
-function removeB(id){const b=S.b[id];if(!b||b.type==='port')return;fields.fe=null;for(const t of tilesOf(b))S.occ[t]=0;delete S.b[id];
-  for(const w of S.w)if(w.home===id||w.target===id)kill(w);if(sel===id)sel=null;}
+function canPlace(type,x,y){return canPlaceS(S,type,x,y);}
+function place(type,x,y){const b=placeBuilding(S,type,x,y,CTX);if(b)dirtyLabor=true;return!!b;}
+function roadCost(i){return roadCostS(S,i);}
+function buildRoad(list){buildRoadS(S,list,CTX);}
+function demolishRect(a,c){demolishArea(S,a,c,id=>removeB(id));}
+function removeB(id){if(removeBuilding(S,id)&&sel===id)sel=null;}
 
 /* ---------- marcheurs ---------- */
-const WCTX={rand:()=>R(),onVisit:w=>markVis(w)};
-function spawn(w){return spawnWalker(S,w,WCTX);}
 function kill(w){killWalker(S,w);}
-function stepW(w){stepWalker(S,w,WCTX);}
 
 /* ---------- simulation ---------- */
-function stepSim(){
-  S.tick++;
-  for(const b of blds())updB(b);
-  for(const w of S.w)if(!w.dead)stepW(w);
-  stepUnits();
-  if(S.tick%50===0)repairWalls(S);
-  S.w=S.w.filter(w=>!w.dead);
-  if(S.tick%10===0)staff();
-  if(S.tick%15===0)immigrate();
-  if(S.tick%MONTH===0)monthly();
-}
-function updB(b){
-  const d=B[b.type];if(b.hp!=null&&b.hp<b.maxhp&&!S.raid)b.hp=Math.min(b.maxhp,b.hp+.05);
-  if(b.type==='hut'||b.type==='well')return;
-  const acc=access(b);
-  if(!acc.length){b.status="Aucun chemin ne touche ce bâtiment";return;}
-  const jb=jobsOf(b),ef=jb?(b.wk||0)/jb:1;
-  if(d.mon){stepMon(b,ef);return;}
-  if(b.type==='tower'||b.type==='barracks'){stepDefB(b,acc,ef);return;}
-  if(d.out){if(workshopStep(S,b,ef))sendCart(b,acc);return;}
-  if(d.roam){
-    if(b.out){b.status="Marcheur en tournée";return;}
-    if(ef<=0){b.status="Personne pour y travailler : il faut plus d'habitants";return;}
-    b.cool-=ef;b.status="Prépare la prochaine tournée";
-    if(b.cool>0)return;
-    const w={k:b.type==='market'?'market':d.roam,home:b.id,god:d.god,start:acc[(R()*acc.length)|0]};
-    if(w.k==='market'){
-      const c=fillMarketBasket(S);
-      if(!c){b.status="Greniers vides : rien à vendre";b.cool=20;return;}
-      w.carry=c;
-    }
-    b.out=true;spawn(w);
-    return;
-  }
-  if(d.store){const u=used(b);b.status=u>=d.cap?"Plein":"En service";return;}
-  if(b.type==='port'){b.status=b.wk>0?"Les navires marchands accostent chaque mois":"Personne pour décharger les navires";return;}
-  if(b.type==='trade'){b.status=S.tradeOK?"Les marchands passent chaque mois":"Pas relié au chemin d'entrée";}
-}
-function sendCart(b,acc){
-  const d=B[b.type];const r=d.out;
-  const best=findDepot(S,acc,r);
-  if(!best){if(!b.stuck){b.stuck=true;staff();}b.status=(r==='ble'||r==='porc')?"Grenier plein ou non relié : les ouvriers sont envoyés ailleurs":"Entrepôt plein ou non relié : les ouvriers sont envoyés ailleurs";return;}
-  if(b.stuck){b.stuck=false;staff();}
-  spawn({k:'cart',home:b.id,target:best.val,res:r,amt:b.hold,path:best.path});
-  b.hold=0;b.cartOut=true;b.status="Livraison en cours";
-}
-function immigrate(){immigrateS(S,WCTX);}
+function stepSim(){simStep(S,CTX,{onMonth:()=>{dirtyObj=true;save();}});}
+function updB(b){buildingStep(S,b,CTX);}
 
 
 
@@ -217,36 +135,7 @@ function staff(){assignLabor(S);}
 function taxRate(){return taxRateOf(S);}
 function taxDue(){return monthlyTaxDue(S);}
 function hasOf(h){return needsOf(S,h);}
-function monthly(){
-  // emploi
-  staff();const{due,paid:wages}=payWages(S);
-  if(wages<due&&!S.flags.unpaid){S.flags.unpaid=1;log("Le trésor est vide : les ouvriers travaillent à crédit en attendant le tribut.");}if(S.money>50)S.flags.unpaid=0;
-  // maisons
-  const hr=housingMonth(S,R);const{hungry,covered,occupied:occ}=hr;
-  for(const e of hr.events)log(e.level===3?"Première longue maison : le village prend de l'importance.":"Une famille noble s'installe dans une demeure digne d'elle.");
-  S.hungry=occ?hungry/occ:0;
-  // faveur
-  {const hit=toutatisMonth(S,covered,occ,R);if(hit!=null){const v=S.b[hit];log(`Taranis lance la foudre : ${B[v.type].n.toLowerCase()} réduit en cendres. Honorez Toutatis.`);removeB(hit);}}
-  godsMonthly();raidMonthly();
-  // commerce
-  const gain=tradeMonth(S);
-  if(gain>0){log(`Un navire marchand venu de l'île de Bretagne repart chargé : ${Math.round(gain)} statères encaissés.`);if(S.dock!=null&&S.dock>=0)FX.push({k:'ship',d:S.dock,t:300});}
-  S.lastTaxM=S.taxM||0;const bal=(S.taxM||0)+gain-wages;S.lastBal=S.balAvg==null?bal:S.balAvg*.6+bal*.4;S.balAvg=S.lastBal;S.taxM=0;
-  S.mi++;
-  if(S.mi%12===0)log(`Samonios : une nouvelle année commence. Le clan compte ${S.pop} âmes.`);
-  checkObj();
-  save();
-}
-const OBJ=[
-  ['Atteindre 150 habitants',()=>S.pop>=150,()=>`${S.pop} / 150`],
-  ['Trois longues maisons',()=>cntL(3)>=3,()=>`${cntL(3)} / 3`],
-  ['Une demeure noble',()=>cntL(4)>=1,()=>`${cntL(4)} / 1`],
-  ['Achever un monument',()=>['menhirs','tumulus','heroes'].some(monDone),()=>`${['menhirs','tumulus','heroes'].filter(monDone).length} / 1`],
-  ['Repousser un raid',()=>!!S.flags.raidWon||S.raids===false,()=>S.raids===false?'raids désactivés':S.flags.raidWon?'fait':'à faire'],
-  ['Trésor de 2 500 statères',()=>S.money>=2500,()=>`${Math.floor(S.money)} / 2500`]
-];
-function cntL(l){return blds().filter(b=>b.type==='hut'&&b.lvl>=l&&b.pop>0).length;}
-function checkObj(){if(!S.won&&OBJ.every(o=>o[1]())){S.won=true;log("Le conseil des druides vous proclame vergobret de l'oppidum. Victoire !");}dirtyObj=true;}
+const OBJ=OBJECTIVES.map(o=>[o.label,()=>o.done(S),()=>o.progress(S)]);
 
 /* ---------- sauvegarde ---------- */
 function ser(){return serialize(S,cam);}
@@ -336,11 +225,7 @@ function passE(i){return passES(S,i);}
 function spawnUnit(k,i,home){return spawnUnitS(S,k,i,CTX,home);}
 function stepUnits(){stepUnitsS(S,CTX);for(const f of FX)f.t--;for(let k=FX.length-1;k>=0;k--)if(FX[k].t<=0)FX.splice(k,1);}
 function startRaid(){return startRaidS(S,CTX);}
-function raidMonthly(){raidMonth(S,CTX);}
 function buildWall(list){buildWallS(S,list,CTX);}
-function stepDefB(b,acc,ef){defenseStep(S,b,acc,ef,CTX);}
-function stepMon(b,ef){monumentStep(S,b,ef,CTX);}
-function godsMonthly(){if(templesMonth(S,R))log("Bélénos fait mûrir les blés : 40 blé de plus au grenier.");}
 
 /* ---- art : défense, temples, monuments ---- */
 

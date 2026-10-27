@@ -10,6 +10,7 @@ npm run dev        # serveur de développement avec rechargement instantané
 npm run build      # produit dist/index.html, un fichier unique autonome
 npm test           # tests de la simulation et de la grille
 npm run typecheck  # vérification TypeScript
+npm run check      # typage, tests et construction, à lancer avant chaque commit
 npm run artifact   # produit dist/artifact.html, la version publiée en artefact Claude
 ```
 
@@ -50,6 +51,10 @@ src/
     defense.ts        pillards, guerriers, tours, remparts, calendrier des raids
     monuments.ts      chantiers des monuments et leur achèvement
     context.ts        ce que la simulation demande au jeu (hasard, chronique, effets)
+    buildings.ts      un pas pour un bâtiment selon sa nature, envoi des porteurs
+    construction.ts   poser, tracer, démolir, créer une partie
+    objectives.ts     objectifs et victoire
+    tick.ts           la boucle : un pas, la fin du mois, l'ordre des systèmes
   data/               ce qui se règle sans toucher à la logique
     buildings.ts      définition des bâtiments et de la barre d'outils
     resources.ts      ressources et prix
@@ -88,12 +93,11 @@ Fait :
 - styles séparés de la page, construction en fichier unique avec Vite ;
 - état typé, sauvegarde versionnée avec migrations, stockage interchangeable, hasard reproductible (`core/state.ts`, `save.ts`, `storage.ts`) ;
 - génération de l'île typée et testée dans `world/` ; la grille hexagonale `core/hex.ts` est typée ;
-- `sim/` bien avancé : emplois, tribut, maisons, stocks, production, marcheurs, migrants, dieux, commerce, défense et monuments typés et testés ; définitions des bâtiments, maisons, ressources et priorités typées.
+- `sim/` complet : toute la simulation (emplois, tribut, maisons, stocks, production, marcheurs, migrants, dieux, commerce, défense, monuments, construction, boucle) est typée, testée et tourne sans écran ; des parties de plusieurs années sont jouées dans les tests et vérifiées reproductibles, y compris après une sauvegarde ; définitions des bâtiments, maisons, ressources et priorités typées.
 
 L'ordre des tirages au hasard dans `world/generate.ts` fixe la forme des îles : le modifier change l'île obtenue pour une graine donnée.
 
 À venir, dans cet ordre, chaque étape gardant le jeu jouable :
-1. fin de `sim/` : la boucle de simulation elle-même (pas, mois, ordre des systèmes) ;
-2. `render/` : projection, caches, kit de dessin, terrain, décors, bâtiments, effets ;
-3. `ui/` : panneaux, barre d'outils, entrées ;
-4. retrait des `@ts-nocheck` et passage progressif en TypeScript strict.
+1. `render/` : projection, caches, kit de dessin, terrain, décors, bâtiments, effets ;
+2. `ui/` : panneaux, barre d'outils, entrées ;
+3. retrait des `@ts-nocheck` et passage progressif en TypeScript strict.
