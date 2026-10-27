@@ -170,7 +170,14 @@ export interface GameState extends Grids {
   /** Tribut encaissé depuis le début du mois. */
   taxM?: number;
 
+  /** Le port (ou un comptoir) est relié à l'entrée et peut recevoir les navires. */
+  tradeOK?: boolean;
+  /** Part des maisons affamées. */
+  hungry?: number;
+
   /* ---- réglages du joueur ---- */
+  /** Foudre de Taranis sur les bâtiments quand Toutatis est négligé (désactivable). */
+  wrath?: boolean;
   /** Taux du tribut : 0 léger, 1 normal, 2 lourd. */
   taxLvl?: 0 | 1 | 2;
   /** Champs de simulation secondaires (statistiques du mois, réglages du joueur…), typés au fil du découpage. */

@@ -13,6 +13,8 @@ import { roadNb as roadNbS, roadSearch } from '../sim/paths';
 import { workshopStep } from '../sim/production';
 import { spawnWalker, killWalker, stepWalker } from '../sim/walkers';
 import { immigrate as immigrateS } from '../sim/migration';
+import { toutatisMonth, templesMonth, festival } from '../sim/gods';
+import { tradeMonth } from '../sim/trade';
 import { nearTerrain } from '../sim/query';
 import { taxRate as taxRateOf, accrueTax, collectTax, monthlyTaxDue, taxPending } from '../sim/tax';
 import { seaDepth, landDistance } from '../world/terrain';
@@ -222,17 +224,11 @@ function monthly(){
   for(const e of hr.events)log(e.level===3?"Première longue maison : le village prend de l'importance.":"Une famille noble s'installe dans une demeure digne d'elle.");
   S.hungry=occ?hungry/occ:0;
   // faveur
-  const target=Math.min(100,(occ?covered/occ*100:50)+(monDone('menhirs')?15:0));
-  S.favor+=(target-S.favor)*.2;S.favor=Math.max(0,Math.min(100,S.favor));
-  if(S.wrath!==false&&occ>5&&S.favor<15&&R()<.12){const c=blds().filter(b=>b.type!=='hut'&&b.type!=='port');if(c.length){const v=c[(R()*c.length)|0];
-    log(`Taranis lance la foudre : ${B[v.type].n.toLowerCase()} réduit en cendres. Honorez Toutatis.`);removeB(v.id);}}
+  {const hit=toutatisMonth(S,covered,occ,R);if(hit!=null){const v=S.b[hit];log(`Taranis lance la foudre : ${B[v.type].n.toLowerCase()} réduit en cendres. Honorez Toutatis.`);removeB(hit);}}
   godsMonthly();raidMonthly();
   // commerce
-  const tr=blds().filter(b=>b.type==='trade'||b.type==='port');
-  S.tradeOK=tr.some(t=>{const set=access(t);return set.length&&bfs(ENTRY(),i=>set.includes(i));});
-  let gain=0;
-  if(S.tradeOK&&blds().some(b=>(b.type==='trade'||b.type==='port')&&b.wk>0))for(const r in S.sell){if(!S.sell[r])continue;const n=Math.floor(stockOf(r)-30);if(n>0){take(r,n);gain+=n*RES[r].p*(S.gf&&S.gf.epona>70?1.25:1);}}
-  if(gain>0){S.money+=gain;log(`Un navire marchand venu de l'île de Bretagne repart chargé : ${Math.round(gain)} statères encaissés.`);if(S.dock!=null&&S.dock>=0)FX.push({k:'ship',d:S.dock,t:300});}
+  const gain=tradeMonth(S);
+  if(gain>0){log(`Un navire marchand venu de l'île de Bretagne repart chargé : ${Math.round(gain)} statères encaissés.`);if(S.dock!=null&&S.dock>=0)FX.push({k:'ship',d:S.dock,t:300});}
   S.lastTaxM=S.taxM||0;const bal=(S.taxM||0)+gain-wages;S.lastBal=S.balAvg==null?bal:S.balAvg*.6+bal*.4;S.balAvg=S.lastBal;S.taxM=0;
   S.mi++;
   if(S.mi%12===0)log(`Samonios : une nouvelle année commence. Le clan compte ${S.pop} âmes.`);
@@ -445,11 +441,7 @@ function stepMon(b,ef){const d=B[b.type];
 const MONMSG={menhirs:"L'alignement de menhirs est dressé. Les dieux contemplent l'oppidum avec bienveillance.",
   tumulus:"Le tumulus royal est achevé. Les ancêtres veillent : le tribut rentre mieux et les familles affluent.",
   heroes:"Le sanctuaire des héros est consacré. Les guerriers se battent désormais avec la force de leurs ancêtres."};
-function godsMonthly(){
-  const bonus=monDone('menhirs')?15:0;
-  for(const gd of['taranis','belenos','epona']){const n=blds().filter(b=>b.type==='t_'+gd&&b.wk>0).length;const tg=Math.min(100,35+30*n+bonus);S.gf[gd]+=(tg-S.gf[gd])*.2;}
-  if(S.gf.belenos>70&&R()<.12&&blds().some(b=>b.type==='granary')){putAny('ble',40);log("Bélénos fait mûrir les blés : 40 blé de plus au grenier.");}
-}
+function godsMonthly(){if(templesMonth(S,R))log("Bélénos fait mûrir les blés : 40 blé de plus au grenier.");}
 
 /* ---- art : défense, temples, monuments ---- */
 
@@ -1136,7 +1128,7 @@ $('raidBtn').onclick=()=>{S.raids=S.raids===false;if(S.raids===false){S.u=S.u.fi
 function renderWrath(){const on=S.wrath!==false;const b=$('wrathBtn');b.setAttribute('aria-pressed',on);b.textContent='Foudre de Taranis : '+(on?'activée':'désactivée');
   $('favNote').textContent=on?"Si la faveur de Toutatis tombe sous 15 %, Taranis peut foudroyer un bâtiment. Une fête élève tous les dieux de 15 points.":"La foudre sur vos bâtiments est désactivée. Une fête élève tous les dieux de 15 points.";}
 $('wrathBtn').onclick=()=>{S.wrath=S.wrath===false;renderWrath();save();};
-$('festBtn').onclick=()=>{if(S.money<200)return;S.money-=200;S.favor=Math.min(100,S.favor+15);for(const k in S.gf)S.gf[k]=Math.min(100,S.gf[k]+15);log("Grande fête : sacrifices et banquet en l'honneur des dieux du clan.");renderGods();};
+$('festBtn').onclick=()=>{if(!festival(S))return;log("Grande fête : sacrifices et banquet en l'honneur des dieux du clan.");renderGods();};
 document.querySelectorAll('.speed [data-s]').forEach(b=>b.onclick=()=>setSpeed(+b.dataset.s));
 $('infoBtn').onclick=()=>setPanel($('panel').dataset.open!=='true');
 let confirmT=0;
