@@ -139,7 +139,7 @@ describe('raids', () => {
     s.mi = 4;
     raidMonth(s, ctx);
     expect(s.raidWarn).toBe(1);
-    expect(ctx.journal.at(-1)).toMatch(/voiles pillardes/);
+    expect(ctx.journal[ctx.journal.length - 1]).toMatch(/voiles pillardes/);
     s.mi = 5;
     raidMonth(s, ctx);
     expect(s.raid).toBe(1);
@@ -187,7 +187,7 @@ describe('monuments', () => {
     expect(m.done).toBe(true);
     expect(progress(m)).toBe(1);
     expect(m.maxhp).toBe(MONUMENT_HP);
-    expect(ctx.journal.at(-1)).toMatch(/menhirs/);
+    expect(ctx.journal[ctx.journal.length - 1]).toMatch(/menhirs/);
   });
 
   it('s’arrêtent faute de matériaux ou de bras', () => {

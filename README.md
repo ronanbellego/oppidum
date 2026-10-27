@@ -47,6 +47,9 @@ src/
     migration.ts      arrivée des familles par le port, et ce qui la freine
     gods.ts           Toutatis et la foudre de Taranis, faveurs des temples, bienfaits, fête
     trade.ts          commerce maritime : liaison du port, ventes au-delà de la réserve
+    defense.ts        pillards, guerriers, tours, remparts, calendrier des raids
+    monuments.ts      chantiers des monuments et leur achèvement
+    context.ts        ce que la simulation demande au jeu (hasard, chronique, effets)
   data/               ce qui se règle sans toucher à la logique
     buildings.ts      définition des bâtiments et de la barre d'outils
     resources.ts      ressources et prix
@@ -85,12 +88,12 @@ Fait :
 - styles séparés de la page, construction en fichier unique avec Vite ;
 - état typé, sauvegarde versionnée avec migrations, stockage interchangeable, hasard reproductible (`core/state.ts`, `save.ts`, `storage.ts`) ;
 - génération de l'île typée et testée dans `world/` ; la grille hexagonale `core/hex.ts` est typée ;
-- `sim/` bien avancé : emplois, tribut, maisons, stocks, production, marcheurs, migrants, dieux et commerce typés et testés ; définitions des bâtiments, maisons, ressources et priorités typées.
+- `sim/` bien avancé : emplois, tribut, maisons, stocks, production, marcheurs, migrants, dieux, commerce, défense et monuments typés et testés ; définitions des bâtiments, maisons, ressources et priorités typées.
 
 L'ordre des tirages au hasard dans `world/generate.ts` fixe la forme des îles : le modifier change l'île obtenue pour une graine donnée.
 
 À venir, dans cet ordre, chaque étape gardant le jeu jouable :
-1. fin de `sim/` : défense, puis la boucle de simulation elle-même ;
+1. fin de `sim/` : la boucle de simulation elle-même (pas, mois, ordre des systèmes) ;
 2. `render/` : projection, caches, kit de dessin, terrain, décors, bâtiments, effets ;
 3. `ui/` : panneaux, barre d'outils, entrées ;
 4. retrait des `@ts-nocheck` et passage progressif en TypeScript strict.
