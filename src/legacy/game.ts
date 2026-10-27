@@ -5,6 +5,9 @@ import { serialize, deserialize } from '../core/save';
 import { localStore } from '../core/storage';
 import { idx, X, Y, inb, SQ3, HR, HX, HY, cube, fromCube, hdist, DIRS, nbDir, NBC, nb4, EDGE_DIR, corner, foot, hexRound, within, hexLine } from '../core/hex';
 import { generateWorld } from '../world/generate';
+import { buildings, tilesOf as tilesOfB, access as accessOf, jobsOf, monumentDone, isHouse } from '../sim/query';
+import { assignLabor, payWages, rations } from '../sim/labor';
+import { taxRate as taxRateOf, accrueTax, collectTax, monthlyTaxDue, taxPending } from '../sim/tax';
 import { seaDepth, landDistance } from '../world/terrain';
 import { MONTHS } from '../data/calendar';
 import { RES } from '../data/resources';
@@ -91,10 +94,10 @@ const shc={};
 function sh(col,f){const k=col+f;if(shc[k])return shc[k];let r,gg,bb;
   if(col[0]==='#'){const n=parseInt(col.slice(1),16);r=n>>16;gg=(n>>8)&255;bb=n&255;}else{const m=col.match(/[\d.]+/g);r=+m[0];gg=+m[1];bb=+m[2];}
   const c=v=>Math.max(0,Math.min(255,Math.round(v*f)));return shc[k]=`rgb(${c(r)},${c(gg)},${c(bb)})`;}
-function blds(){return Object.values(S.b);}
-function tilesOf(b){return foot(b.s,b.x,b.y)||[];}
+function blds(){return buildings(S);}
+const tilesOf=tilesOfB;
 function roadNb(i){return nb4(i).filter(j=>S.road[j]);}
-function access(b){const t=tilesOf(b),out=[];for(const f of t)for(const j of nb4(f))if(S.road[j]&&!t.includes(j)&&!out.includes(j))out.push(j);return out;}
+function access(b){return accessOf(S,b);}
 function bfs(start,goal){
   const prev=new Int32Array(N*N).fill(-2);prev[start]=-1;const q=[start];let h=0;
   while(h<q.length){const i=q[h++];const g=goal(i);if(g){const p=[];let k=i;while(k!==-1){p.push(k);k=prev[k];}p.reverse();return{path:p,val:g};}
@@ -189,7 +192,7 @@ function serve(w){
     const h=S.b[id];if(!h||h.type!=='hut'||h.pop<=0||w.seen[id])continue;w.seen[id]=1;
     if(w.k==='druid'||w.k==='priest')h.relig=S.mi;
     else if(w.k==='bard')h.ent=S.mi;
-    else if(w.k==='tax'){const v=(h.owed||0)*(monDone('tumulus')?1.25:1);if(v>0){S.money+=v;S.taxM+=v;h.owed=0;}h.lastTax=S.mi;}
+    else if(w.k==='tax'){collectTax(S,h);}
     else if(w.k==='market'){const per=Math.ceil(h.pop/4)*6;
       for(const f of['ble','porc']){const g=Math.min(Math.max(0,per-h.food[f]),w.carry[f]||0);h.food[f]+=g;w.carry[f]-=g;}
       if(h.lvl>=2){const g=Math.min(Math.max(0,3-h.cerv),w.carry.cervoise||0);h.cerv+=g;w.carry.cervoise-=g;}
@@ -278,15 +281,9 @@ function immigrate(){
 
 
 
-function staff(){
-  let pop=0,cons=0;for(const b of blds())if(b.type==='hut'){pop+=b.pop;cons+=Math.ceil(b.pop/4);}S.pop=pop;S.cons=cons;S.labor=Math.floor(pop*BAL.laborShare);
-  const list=blds().filter(b=>jobsOf(b)).sort((a,b)=>(PRIO[a.type]-PRIO[b.type])||((SUB[a.type]??3)-(SUB[b.type]??3))||(a.id-b.id));
-  let left=S.labor,jobs=0;S.sect=[[0,0],[0,0],[0,0],[0,0],[0,0]];
-  for(const b of list){const j=jobsOf(b);if(!access(b).length||b.stuck){b.wk=0;continue;}jobs+=j;const w=Math.min(j,left);b.wk=w;left-=w;const t=S.sect[PRIO[b.type]];t[0]+=w;t[1]+=j;}
-  S.jobs=jobs;S.emp=S.labor-left;S.unemp=left;S.eff=jobs?S.emp/jobs:1;
-}
-function taxRate(){return[.6,1,1.5][S.taxLvl??1];}
-function taxDue(){let t=0;for(const h of blds())if(h.type==='hut'&&h.pop>0)t+=h.pop*LV[h.lvl].tax;return t*taxRate()*(monDone('tumulus')?1.25:1);}
+function staff(){assignLabor(S);}
+function taxRate(){return taxRateOf(S);}
+function taxDue(){return monthlyTaxDue(S);}
 function hasOf(h){
   const wells=blds().filter(b=>b.type==='well');
   const water=wells.some(w=>hdist(idx(w.x,w.y),idx(h.x,h.y))<=3);
@@ -297,7 +294,7 @@ function lvlFor(a){let d=1;if(a.water&&a.food){d=2;if(a.relig&&a.cerv){d=3;if(a.
 function monthly(){
   const hs=blds().filter(b=>b.type==='hut');
   // emploi
-  staff();const due=S.emp*BAL.wage,wages=Math.min(due,Math.max(0,S.money));S.money-=wages;
+  staff();const{due,paid:wages}=payWages(S);
   if(wages<due&&!S.flags.unpaid){S.flags.unpaid=1;log("Le trésor est vide : les ouvriers travaillent à crédit en attendant le tribut.");}if(S.money>50)S.flags.unpaid=0;
   // maisons
   let hungry=0,covered=0,occ=0;
@@ -312,8 +309,8 @@ function monthly(){
     else if(d<h.lvl){h.bad++;if(h.bad>=2){h.lvl--;h.bad=0;}}
     else h.bad=0;
     if(h.pop>LV[h.lvl].cap)h.pop=LV[h.lvl].cap;
-    {const m=h.pop*LV[h.lvl].tax*taxRate();h.owed=Math.min((h.owed||0)+m,m*BAL.taxCapMonths);}
-    let need=Math.ceil(h.pop/4);
+    accrueTax(S,h);
+    let need=rations(h.pop);
     for(const f of['porc','ble']){const t=Math.min(need,h.food[f]);h.food[f]-=t;need-=t;}
     if(need>0){hungry++;h.hungry++;if(h.hungry>4&&h.pop>1&&R()<.4)h.pop--;}else h.hungry=0;
     if(h.lvl>=3)h.cerv=Math.max(0,h.cerv-1);
@@ -332,7 +329,7 @@ function monthly(){
   let gain=0;
   if(S.tradeOK&&blds().some(b=>(b.type==='trade'||b.type==='port')&&b.wk>0))for(const r in S.sell){if(!S.sell[r])continue;const n=Math.floor(stockOf(r)-30);if(n>0){take(r,n);gain+=n*RES[r].p*(S.gf&&S.gf.epona>70?1.25:1);}}
   if(gain>0){S.money+=gain;log(`Un navire marchand venu de l'île de Bretagne repart chargé : ${Math.round(gain)} statères encaissés.`);if(S.dock!=null&&S.dock>=0)FX.push({k:'ship',d:S.dock,t:300});}
-  S.lastTaxM=S.taxM;const bal=S.taxM+gain-wages;S.lastBal=S.balAvg==null?bal:S.balAvg*.6+bal*.4;S.balAvg=S.lastBal;S.taxM=0;
+  S.lastTaxM=S.taxM||0;const bal=(S.taxM||0)+gain-wages;S.lastBal=S.balAvg==null?bal:S.balAvg*.6+bal*.4;S.balAvg=S.lastBal;S.taxM=0;
   S.mi++;
   if(S.mi%12===0)log(`Samonios : une nouvelle année commence. Le clan compte ${S.pop} âmes.`);
   checkObj();
@@ -430,8 +427,7 @@ function cartFig(px,py,ph,res){
 /* ---------- défense : remparts, unités, raids ---------- */
 let FE=null,FW=null;const FX=[];
 const ESP=.075,WSP=.1;
-function monDone(t){return blds().some(b=>b.type===t&&b.done);}
-function jobsOf(b){const d=B[b.type];return d.mon&&b.done?0:(d.jobs||0);}
+function monDone(t){return monumentDone(S,t);}
 function monProg(b){const d=B[b.type].mon;let a=0,n=0;for(const r in d){n+=d[r];a+=Math.min(d[r],(b.got&&b.got[r])||0);}return n?a/n:1;}
 function passE(i){const t=S.ter[i];if(t===3||S.occ[i])return false;if(t===2&&!S.road[i])return false;return true;}
 function passW(i){return passE(i)&&S.wall[i]!==1;}
@@ -1207,7 +1203,7 @@ function renderLabor(){const sc=S.sect||[[0,0],[0,0],[0,0],[0,0],[0,0]];const mi
   h+=miss>0?`<span class="chip warn">Il manque ${miss} travailleurs, soit environ ${miss*2} habitants</span>`:S.unemp>0?`<span class="chip">${S.unemp} sans travail : vous pouvez ouvrir des bâtiments</span>`:S.jobs?'<span class="chip good">Tous les postes sont pourvus</span>':'';
   $('laborBody').innerHTML=h;}
 function renderTax(){const lv=S.taxLvl??1;document.querySelectorAll('#taxBtns button').forEach(b=>b.setAttribute('aria-pressed',+b.dataset.t===lv));
-  let owed=0;for(const h of blds())if(h.type==='hut')owed+=h.owed||0;const chief=blds().some(b=>b.type==='chief'&&b.wk>0);
+  const owed=taxPending(S);const chief=blds().some(b=>b.type==='chief'&&b.wk>0);
   $('taxBody').innerHTML=`<div class="row"><span class="muted">Dû chaque mois</span><span>${Math.round(taxDue())} st.</span></div><div class="row"><span class="muted">En attente dans les maisons</span><span>${Math.round(owed)} st.</span></div>`+
    (chief?'':'<span class="chip warn">Sans maison du chef, personne ne collecte</span>')+
    `<p class="muted" style="font-size:12.5px">Chaque maison accumule son tribut ; le collecteur ramasse tout à son passage. ${['Léger : les familles arrivent plus nombreuses.','Normal : aucun effet sur les arrivées.','Lourd : les familles hésitent à venir.'][lv]}</p>`;}

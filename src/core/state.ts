@@ -55,7 +55,26 @@ export interface Building {
   /** Travailleurs affectés. */
   wk?: number;
   stock: Record<string, number>;
+  /** Atelier dont la production ne trouve plus de place : ses ouvriers sont envoyés ailleurs. */
+  stuck?: boolean;
+  /** Monument achevé, et matériaux déjà livrés au chantier. */
+  done?: boolean;
+  got?: Record<string, number>;
   [extra: string]: unknown;
+}
+
+/** Une maison (type « hut »), quel que soit son niveau. */
+export interface House extends Building {
+  type: 'hut';
+  pop: number;
+  /** Habitants en route vers la maison. */
+  inc: number;
+  /** Niveau, de 1 (hutte) à 4 (demeure noble). */
+  lvl: 1 | 2 | 3 | 4;
+  /** Tribut accumulé, en attente du collecteur. */
+  owed?: number;
+  /** Mois du dernier passage du collecteur. */
+  lastTax: number;
 }
 
 export interface Walker {
@@ -107,6 +126,26 @@ export interface GameState extends Grids {
   /** Compteur de modifications du relief, pour invalider les caches. */
   hver?: number;
   won: boolean;
+
+  /* ---- statistiques recalculées par la simulation ---- */
+  pop?: number;
+  /** Rations consommées par mois. */
+  cons?: number;
+  /** Travailleurs disponibles, postes ouverts, employés, sans-emploi. */
+  labor?: number;
+  jobs?: number;
+  emp?: number;
+  unemp?: number;
+  /** Part des postes pourvus. */
+  eff?: number;
+  /** Par secteur : [employés, postes]. */
+  sect?: [number, number][];
+  /** Tribut encaissé depuis le début du mois. */
+  taxM?: number;
+
+  /* ---- réglages du joueur ---- */
+  /** Taux du tribut : 0 léger, 1 normal, 2 lourd. */
+  taxLvl?: 0 | 1 | 2;
   /** Champs de simulation secondaires (statistiques du mois, réglages du joueur…), typés au fil du découpage. */
   [extra: string]: unknown;
 }

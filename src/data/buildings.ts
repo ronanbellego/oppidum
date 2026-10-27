@@ -1,6 +1,8 @@
-// @ts-nocheck — extrait tel quel de la version mono-fichier ; à typer progressivement.
+import type { BuildingDef } from './types';
 
-const B={
+/** Bâtiments et outils, par identifiant. */
+
+export const B: Record<string, BuildingDef> = {
   inspect:{n:'Observer',c:'#a5a38d',d:"Cliquez sur un bâtiment pour voir son état. Faites glisser pour déplacer la vue, molette ou pincement pour zoomer."},
   road:{n:'Chemin',cost:2,c:'#b39563',d:"Faites glisser pour tracer. Porteurs et marcheurs ne circulent que sur les chemins. 4 st. à travers bois, 20 st. pour un pont."},
   demolish:{n:'Démolir',cost:0,c:'#de6a4e',d:"Faites glisser pour raser une zone. Rien n'est remboursé."},
@@ -31,8 +33,10 @@ const B={
   tumulus:{n:'Tumulus royal',cost:250,s:3,jobs:8,mon:{pierre:40,bois:50,torques:10},c:'#7d9a52',d:"Monument, 3×3. Il faut 40 pierre, 50 bois et 10 torques. Achevé, le tribut rapporte un quart de plus et le chômage ne freine plus les arrivées."},
   heroes:{n:'Sanctuaire des héros',cost:250,s:3,jobs:8,mon:{pierre:30,bois:30,fer:30},c:'#c8b07a',d:"Monument, 3×3, orné de trophées d'armes. Il faut 30 pierre, 30 bois et 30 fer. Achevé, vos guerriers frappent plus fort et résistent mieux."}
 };
-const GODC={taranis:'#7d93b8',belenos:'#e0b43c',epona:'#b0643a'};
-const TOOLS=[
+/** Couleur de chaque dieu (prêtres, temples). */
+export const GODC: Record<string, string> = {taranis:'#7d93b8',belenos:'#e0b43c',epona:'#b0643a'};
+/** Groupes de la barre de construction. */
+export const TOOLS: [string, string[]][] = [
   ['Terrain',['inspect','road','demolish']],
   ['Habitat',['hut','well']],
   ['Vivres',['farm','pigs','granary','market']],
@@ -43,4 +47,3 @@ const TOOLS=[
   ['Monuments',['menhirs','tumulus','heroes']]
 ];
 
-export { B, GODC, TOOLS };
