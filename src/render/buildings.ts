@@ -2,10 +2,11 @@
 import { HR, HX, HY, corner, idx } from '../core/hex';
 import { used } from '../sim/stock';
 import { B } from '../data/buildings';
-import { AC, INK } from '../data/palette';
+import { AC, INK, OUTLINE } from '../data/palette';
 import { A } from '../app/state';
 import { CR, DP2, SR, TILT, W, ZH, ZW, bc, fshade, vis } from './projection';
-import { P, bbox, blur, ln, pick3, sh, sprite, strokes } from './kit';
+import { P, bbox, blur, ln, mix, pick3, sh, shadowSprite, sprite, strokes } from './kit';
+import { TCOL } from '../data/palette';
 import { figure, shipFig, smoke } from './units';
 import { monProg } from '../app/game';
 import { softShadow } from './terrain';
@@ -49,6 +50,7 @@ function roundPts(sp, r) {
   return o;
 }
 function hatchClip(sp, rnd, dens) {
+  if (!OUTLINE) return;
   const [a, b, c, d] = bbox(sp);
   const n = Math.max(2, ((c - a) * (d - b) * (dens || 0.035)) | 0);
   A.g.strokeStyle = INK;
@@ -99,19 +101,17 @@ function facets(sp, col, rnd, amp) {
     }
   }
 }
+/* une face plane : arêtes vives, découpée en quelques facettes de tons voisins (et, dans l'ancien style, un trait de crayon) */
 function face(sp, col, rnd, tex, sh2, pw) {
-  const rp = roundPts(sp, 1.6);
-  pathPts(rp, true);
-  A.g.fillStyle = col;
-  A.g.fill();
+  P(sp, col, col, 0.5);
   A.g.save();
-  pathPts(rp, true);
+  pathPts(sp, true);
   A.g.clip();
-  facets(sp, col, rnd, 0.16);
+  facets(sp, col, rnd, 0.1);
   if (tex && !tex.surf) tex(sp, col, rnd);
   A.g.restore();
-  pencil(rp, true, pw || 0.75, rnd, INK, 0.6);
-  return rp;
+  if (OUTLINE) pencil(roundPts(sp, 1.6), true, pw || 0.75, rnd, INK, 0.6);
+  return sp;
 }
 const TX = {
   stone(sp, c, rnd) {
@@ -452,24 +452,76 @@ function cylDoor(cx, cy, r, z0, h, rnd, col) {
     0.8,
   );
 }
-function ground(s, col, rnd, ins) {
-  for (const [ox, oy] of FOOT[s]) {
-    const sp = [];
-    for (let k = 0; k < 6; k++) {
-      const [x, y] = corner(ox, oy, k, HR * (ins || 0.9));
-      sp.push(W(x, y, 0.4));
+/*
+ * Le sol d'un bâtiment (terre battue, champ, pavage) est peint à part, sous les ombres : le dessin d'un bâtiment
+ * passe en trois couches, le sol (A.LAYER = 'ground'), l'ombre (A.SHADOW) et le volume (A.LAYER = 'body').
+ */
+function onGround(fn) {
+  if (A.SHADOW || A.LAYER === 'body') return;
+  if (A.LAYER === 'ground') {
+    const g = A.g;
+    A.g = A.GROUNDG;
+    try {
+      fn();
+    } finally {
+      A.g = g;
     }
-    const rp = roundPts(sp, 4);
-    pathPts(rp, true);
-    A.g.fillStyle = col;
-    A.g.fill();
-    A.g.save();
-    pathPts(rp, true);
-    A.g.clip();
-    facets(sp, col, rnd, 0.1);
-    A.g.restore();
-    pencil(rp, true, 0.6, rnd, INK, 0.35);
+  } else fn();
+}
+/* contour de l'emprise : les arêtes extérieures des cases, chaînées, puis resserrées vers le centre et chanfreinées */
+const UNION = {};
+function outline(s, shrink, cut) {
+  const k0 = s + '|' + shrink + '|' + cut;
+  if (UNION[k0]) return UNION[k0];
+  const key = p => Math.round(p[0] * 1000) + ',' + Math.round(p[1] * 1000),
+    edges = new Map();
+  for (const [ox, oy] of FOOT[s])
+    for (let k = 0; k < 6; k++) {
+      const a = corner(ox, oy, k, HR),
+        b = corner(ox, oy, (k + 1) % 6, HR),
+        ka = key(a),
+        kb = key(b),
+        id = ka < kb ? ka + '>' + kb : kb + '>' + ka;
+      if (edges.has(id)) edges.delete(id);
+      else edges.set(id, [a, b]);
+    }
+  const list = [...edges.values()],
+    loop = [list[0][0]];
+  let cur = list[0][1];
+  list.splice(0, 1);
+  while (list.length) {
+    loop.push(cur);
+    const n = list.findIndex(([a, b]) => key(a) === key(cur) || key(b) === key(cur));
+    if (n < 0) break;
+    const [a, b] = list.splice(n, 1)[0];
+    cur = key(a) === key(cur) ? b : a;
   }
+  let cx = 0,
+    cy = 0;
+  for (const [ox, oy] of FOOT[s]) {
+    cx += ox;
+    cy += oy;
+  }
+  cx /= FOOT[s].length;
+  cy /= FOOT[s].length;
+  const sm = loop.map(p => [cx + (p[0] - cx) * shrink, cy + (p[1] - cy) * shrink]);
+  const out = [];
+  for (let k = 0; k < sm.length; k++) {
+    const p = sm[(k + sm.length - 1) % sm.length],
+      c = sm[k],
+      q = sm[(k + 1) % sm.length];
+    out.push([c[0] + (p[0] - c[0]) * cut, c[1] + (p[1] - c[1]) * cut], [c[0] + (q[0] - c[0]) * cut, c[1] + (q[1] - c[1]) * cut]);
+  }
+  return (UNION[k0] = out);
+}
+/* sol tassé sous un bâtiment, sans contour, un peu fondu dans la prairie */
+function ground(s, col, rnd, ins) {
+  onGround(() => {
+    const c = mix(col, TCOL.g, 0.22),
+      pts = outline(s, Math.min(0.96, (ins || 0.9) * 0.95), 0.22).map(([x, y]) => W(x + (rnd() - 0.5) * 0.03, y + (rnd() - 0.5) * 0.03, 0.6));
+    P(pts, c, c, 0.6);
+    facets(pts, c, rnd, 0.06);
+  });
 }
 function post(x, y, z0, z1, rnd, col) {
   const a = W(x, y, z0),
@@ -613,6 +665,7 @@ function shield3(x, y, z, col, rnd) {
   pencil(smoothPts(irregular(p[0], p[1], 2.6, 4.2, 8, rnd, 0.05)), true, 0.5, rnd);
 }
 function menhir3(x, y, h, rnd) {
+  if (A.SHADOW) return;
   const p = W(x, y);
   softShadow(p[0] + 4, p[1] + 1, 6, 2.4);
   const sp = [
@@ -644,44 +697,97 @@ function bArt2(key, s, fn) {
   return sprite('B2' + key, -(s * 44 + 60), -175, s * 44 + 60, s * 34 + 40, rnd => {
     const p = A.LOC;
     A.LOC = null;
+    A.LAYER = 'body';
+    try {
+      fn(rnd);
+    } finally {
+      A.LOC = p;
+      A.LAYER = null;
+    }
+  });
+}
+let DUMMY = null;
+function bGroundArt(key, s, fn) {
+  return sprite('G|B2' + key, -(s * 44 + 30), -(s * 30 + 20), s * 44 + 30, s * 34 + 30, rnd => {
+    const p = A.LOC,
+      real = A.g;
+    if (!DUMMY) {
+      const c = document.createElement('canvas');
+      c.width = c.height = 1;
+      DUMMY = c.getContext('2d');
+    }
+    A.LOC = null;
+    A.LAYER = 'ground';
+    A.GROUNDG = real;
+    A.g = DUMMY;
+    try {
+      fn(rnd);
+    } finally {
+      A.g = real;
+      A.LOC = p;
+      A.LAYER = null;
+      A.GROUNDG = null;
+    }
+  });
+}
+/* ce qu'il faut dessiner pour un bâtiment : une clé de cache, une taille d'emprise et la fonction de dessin */
+function artOf(b) {
+  const t = b.type,
+    v = b.id % 3,
+    s = b.s;
+  if (t === 'hut') {
+    if (b.pop <= 0 && b.inc <= 0)
+      return [
+        'plot',
+        1,
+        rnd => {
+          ground(1, '#c7ae84', rnd, 0.72);
+          const R = ring(0, 0, 0.3, 0.3, 6);
+          for (const [x, y] of R) post(x, y, 0, 8, rnd, AC.boisC);
+          A.g.strokeStyle = 'rgba(240,232,210,.8)';
+          A.g.lineWidth = 0.6;
+          A.g.beginPath();
+          R.concat([R[0]]).forEach(([x, y], k) => {
+            const p = W(x, y, 6);
+            k ? A.g.lineTo(p[0], p[1]) : A.g.moveTo(p[0], p[1]);
+          });
+          A.g.stroke();
+        },
+      ];
+    return ['h' + b.lvl + '_' + v, 1, rnd => houseArt(b.lvl, v, rnd)];
+  }
+  if (t === 'farm') {
+    const st = Math.min(3, Math.floor((b.prog / B.farm.time) * 4));
+    return ['farm' + st, 2, rnd => farmArt2(st, rnd)];
+  }
+  if (t.startsWith('t_')) return [t, 3, rnd => templeArt2(B[t].god, rnd)];
+  if (B[t].mon) {
+    const st = b.done ? 2 : monProg(b) >= 0.5 ? 1 : 0;
+    return [t + st, 3, rnd => monArt2(t, st, rnd)];
+  }
+  return [t, s, rnd => (ART2[t] || ART2.store)(rnd)];
+}
+function bSprite(b) {
+  const [key, s, fn] = artOf(b);
+  return bArt2(key, s, fn);
+}
+/* sol du bâtiment (terre battue, champ), à poser avant les ombres */
+function bGround(b) {
+  const [key, s, fn] = artOf(b);
+  return bGroundArt(key, s, fn);
+}
+/* ombre portée du bâtiment, à poser au sol avant de le dessiner */
+function bShadow(b) {
+  const [key, s, fn] = artOf(b);
+  return shadowSprite('B2' + key, -(s * 44 + 90), -175, s * 44 + 90, s * 34 + 60, rnd => {
+    const p = A.LOC;
+    A.LOC = null;
     try {
       fn(rnd);
     } finally {
       A.LOC = p;
     }
   });
-}
-function bSprite(b) {
-  const t = b.type,
-    v = b.id % 3,
-    s = b.s;
-  if (t === 'hut') {
-    if (b.pop <= 0 && b.inc <= 0)
-      return bArt2('plot', 1, rnd => {
-        ground(1, '#c7ae84', rnd, 0.72);
-        const R = ring(0, 0, 0.3, 0.3, 6);
-        for (const [x, y] of R) post(x, y, 0, 8, rnd, AC.boisC);
-        A.g.strokeStyle = 'rgba(240,232,210,.8)';
-        A.g.lineWidth = 0.6;
-        A.g.beginPath();
-        R.concat([R[0]]).forEach(([x, y], k) => {
-          const p = W(x, y, 6);
-          k ? A.g.lineTo(p[0], p[1]) : A.g.moveTo(p[0], p[1]);
-        });
-        A.g.stroke();
-      });
-    return bArt2('h' + b.lvl + '_' + v, 1, rnd => houseArt(b.lvl, v, rnd));
-  }
-  if (t === 'farm') {
-    const st = Math.min(3, Math.floor((b.prog / B.farm.time) * 4));
-    return bArt2('farm' + st, 2, rnd => farmArt2(st, rnd));
-  }
-  if (t.startsWith('t_')) return bArt2(t, 3, rnd => templeArt2(B[t].god, rnd));
-  if (B[t].mon) {
-    const st = b.done ? 2 : monProg(b) >= 0.5 ? 1 : 0;
-    return bArt2(t + st, 3, rnd => monArt2(t, st, rnd));
-  }
-  return bArt2(t, s, rnd => (ART2[t] || ART2.store)(rnd));
 }
 function houseArt(L, v, rnd) {
   if (L === 1) {
@@ -735,35 +841,29 @@ function houseArt(L, v, rnd) {
   banner(-0.36, 0.22, 0, 30, AC.guede, rnd);
 }
 function farmArt2(st, rnd) {
-  const col = ['#a07a52', '#93905a', '#7fa05a', '#e3bd55'][st];
-  for (const [ox, oy] of FOOT[2]) {
-    const sp = [];
-    for (let k = 0; k < 6; k++) {
-      const [x, y] = corner(ox, oy, k, HR * 0.92);
-      sp.push(W(x, y, 0.4));
-    }
-    const rp = roundPts(sp, 4);
-    pathPts(rp, true);
-    A.g.fillStyle = col;
-    A.g.fill();
+  const col = ['#b08458', '#a4a05a', '#86b04e', '#efc556'][st];
+  onGround(() => {
+    const sp = outline(2, 0.95, 0.12).map(([x, y]) => W(x, y, 0.5));
+    P(sp, col, col, 0.6);
     A.g.save();
-    pathPts(rp, true);
+    pathPts(sp, true);
     A.g.clip();
-    for (let k = -6; k <= 6; k++) {
-      const a = W(ox - 0.5, oy + k * 0.08),
-        b = W(ox + 0.5, oy + k * 0.08);
-      A.g.strokeStyle = sh(col, 0.72);
+    facets(sp, col, rnd, 0.05);
+    for (let k = -13; k <= 13; k++) {
+      const a = W(-1.1, k * 0.08),
+        b = W(1.1, k * 0.08);
+      A.g.strokeStyle = sh(col, 0.8);
       A.g.lineWidth = 1.1;
       A.g.beginPath();
       A.g.moveTo(a[0], a[1]);
       A.g.lineTo(b[0], b[1]);
       A.g.stroke();
       if (st > 0)
-        for (let t = 0; t < 1; t += 0.06) {
+        for (let t = 0; t < 1; t += 0.03) {
           const x = a[0] + (b[0] - a[0]) * t,
             y = a[1] + (b[1] - a[1]) * t,
             h = [0, 2, 4.5, 7][st];
-          A.g.strokeStyle = st === 3 ? (rnd() < 0.5 ? '#f2d27a' : '#c99a3a') : rnd() < 0.5 ? '#5f9a4a' : '#8dbb5e';
+          A.g.strokeStyle = st === 3 ? (rnd() < 0.5 ? '#f6d872' : '#d9a634') : rnd() < 0.5 ? '#5f9a4a' : '#8dbb5e';
           A.g.lineWidth = 0.9;
           A.g.beginPath();
           A.g.moveTo(x, y);
@@ -772,8 +872,7 @@ function farmArt2(st, rnd) {
         }
     }
     A.g.restore();
-    pencil(rp, true, 0.7, rnd, INK, 0.5);
-  }
+  });
   ground(1, '#bfa580', rnd, 0.22);
   cyl(-0.02, -0.04, 0.09, 0, 5, AC.granit, rnd, TX.stone);
   cone(-0.02, -0.04, 0.13, 5, 10, AC.chaume, rnd);
@@ -852,7 +951,7 @@ function templeArt2(god, rnd) {
     [0.9, 0.3],
     [-0.85, -0.4],
   ])
-    oak3(...W(x, y), 0.8, rnd, '#4a6a42');
+    oak3(...W(x, y), 0.8, rnd);
 }
 function monArt2(t, st, rnd) {
   if (t === 'menhirs') {
@@ -1345,7 +1444,7 @@ const ART2 = {
     [AC.guede, AC.ocre, AC.ajonc].forEach((c, k) => shield3(0.26 + k * 0.15, 0.44, 4, c, rnd));
   },
   grove(rnd) {
-    ground(3, '#6ea56f', rnd, 0.94);
+    ground(3, '#6fa04c', rnd, 0.94);
     A.g.strokeStyle = 'rgba(240,232,200,.4)';
     A.g.lineWidth = 1.2;
     const [cx, cy] = W(0, 0);
@@ -1360,7 +1459,7 @@ const ART2 = {
       [0.6, -0.85],
     ];
     trees.sort((a, b) => DP2(...a) - DP2(...b));
-    for (const [x, y] of trees) oak3(...W(x, y), 1, rnd, '#4a6a42');
+    for (const [x, y] of trees) oak3(...W(x, y), 1, rnd);
     menhir3(0, 0, 30, rnd);
     for (const [c, o] of [
       [AC.ocre, -5],
@@ -1380,7 +1479,7 @@ const ART2 = {
       [-0.95, 0.5],
       [0.9, 0.55],
     ])
-      oak3(...W(x, y), 1, rnd, '#4a6a42');
+      oak3(...W(x, y), 1, rnd);
   },
   bard(rnd) {
     ground(2, '#a99a72', rnd, 0.9);
@@ -1585,7 +1684,7 @@ function liveB2(b, time) {
     A.g.fillRect(px - 14, py, 28 * Math.max(0, b.hp / b.maxhp), 4);
   }
 }
-document.querySelectorAll('.vb button').forEach(
+document.querySelectorAll('.vb button[data-v]').forEach(
   b =>
     (b.onclick = () => {
       A.view = b.dataset.v;
@@ -1593,4 +1692,4 @@ document.querySelectorAll('.vb button').forEach(
     }),
 );
 
-export { bSprite, liveB };
+export { bGround, bShadow, bSprite, liveB };

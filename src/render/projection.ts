@@ -17,8 +17,14 @@ function W(x, y, z = 0) {
   if (A.LOC) {
     x = (x - A.LOC.c) * A.LOC.k + A.LOC.ox;
     y = (y - A.LOC.c) * A.LOC.k + A.LOC.oy;
-    z += A.LOC.z || 0;
   }
+  // ombre portée : le point est rabattu au sol, à l'opposé du soleil, d'autant plus loin qu'il est haut
+  if (A.SHADOW && z > 0) {
+    x += z * A.SHADOW[0];
+    y += z * A.SHADOW[1];
+    z = 0;
+  }
+  if (A.LOC) z += A.LOC.z || 0;
   return [(x * CR - y * SR) * HW, (x * SR + y * CR) * HW * TILT - z];
 }
 const DP2 = (x, y) => x * SR + y * CR,
@@ -49,7 +55,7 @@ function ZH(i) {
 }
 function hexI(i, f, s, lw, ins, z) {
   ins = ins || 1;
-  if (z != null || (A.S.ter[i] === 2 && !A.S.road[i])) {
+  if (z != null || A.S.ter[i] === 2) {
     P(hexPts(HX(i), HY(i), HR * ins, z == null ? ZH(i) : z), f, s, lw);
     return;
   }

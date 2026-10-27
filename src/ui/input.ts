@@ -7,6 +7,11 @@ import { CR, DPi, HW, SR, STEP, TILT, ZH, ZW } from '../render/projection';
 import { buildRoad, buildWall, demolishRect, place, roadLine } from '../app/game';
 import { setPanel, setSpeed, setTool } from './panels';
 
+/* ---------- grille : affichée ou masquée par le bouton « Grille » ou la touche G, choix gardé d'une partie à l'autre ---------- */
+const GRID_KEY='oppidum-grille';
+function setGrid(on){A.grid=!!on;const b=$('gridBtn');if(b)b.setAttribute('aria-pressed',String(A.grid));try{localStorage.setItem(GRID_KEY,A.grid?'1':'0');}catch(e){}}
+{let on=false;try{on=localStorage.getItem(GRID_KEY)==='1';}catch(e){}A.grid=on;const b=$('gridBtn');if(b){b.setAttribute('aria-pressed',String(on));b.onclick=()=>setGrid(!A.grid);}}
+
 /* ---------- entrées ---------- */
 function resize(){const r=$('view').getBoundingClientRect();A.dpr=window.devicePixelRatio||1;A.cw=r.width;A.ch=r.height;cv.width=Math.max(1,A.cw*A.dpr|0);cv.height=Math.max(1,A.ch*A.dpr|0);}
 function pick(cx,cy){const r=cv.getBoundingClientRect();const wx=(cx-r.left-A.cw/2)/A.cam.z+A.cam.x,wy=(cy-r.top-A.ch/2)/A.cam.z+A.cam.y;
@@ -48,8 +53,9 @@ cv.addEventListener('wheel',e=>{e.preventDefault();const r=cv.getBoundingClientR
 const keys={};
 addEventListener('keydown',e=>{if(e.target.tagName==='BUTTON'&&(e.key===' '||e.key==='Enter'))return;keys[e.key.toLowerCase()]=1;
   if(e.key==='Escape'){setTool('inspect');A.sel=null;A.dirtySel=true;}
+  if((e.key==='g'||e.key==='G')&&!e.ctrlKey&&!e.metaKey&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName))setGrid(!A.grid);
   if(e.key===' '){e.preventDefault();setSpeed(A.speed?0:1);}
   if(e.key==='+'||e.key==='=')A.cam.z=Math.min(2.4,A.cam.z*1.15);if(e.key==='-')A.cam.z=Math.max(.45,A.cam.z/1.15);});
 addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=0;});
 
-export { keys, resize };
+export { keys, resize, setGrid };

@@ -40,6 +40,8 @@ button:focus-visible{outline:2px solid var(--bronze);outline-offset:2px}
 .vb{display:flex;flex-wrap:wrap;gap:2px;background:rgba(25,28,22,.9);border:1px solid var(--line);border-radius:6px;padding:3px}
 .vb button{background:none;border:0;border-radius:4px;padding:4px 9px;font-size:12px}
 .vb button[aria-pressed="true"]{background:var(--bronze);color:#1a140a;font-weight:700}
+.vb .vb-grid{margin-left:6px;border-left:1px solid var(--line);border-radius:0 4px 4px 0}
+.vb .vb-grid[aria-pressed="true"]{background:#e8e2cf;color:#1a140a}
 #viewNote{background:rgba(25,28,22,.9);border:1px solid var(--line);border-radius:6px;padding:7px 10px;font-size:12.5px;line-height:1.4;max-width:380px}
 #viewNote b{font-weight:700}
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;vertical-align:baseline;margin:0 2px}

@@ -80,7 +80,7 @@ function renderViews() {
   if (key === A.lastOv) return;
   A.lastOv = key;
   document
-    .querySelectorAll('.vb button')
+    .querySelectorAll('.vb button[data-v]')
     .forEach(b => b.setAttribute('aria-pressed', b.dataset.v === (A.view === 'none' && k ? k : A.view)));
   const n = $('viewNote');
   if (!k) {

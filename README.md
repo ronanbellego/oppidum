@@ -123,13 +123,20 @@ L'ordre des tirages au hasard dans `world/generate.ts` fixe la forme des îles :
 
 ## Rendu visuel
 
-### Comment il est fait aujourd'hui
+### Comment il est fait
 
-Tout est dessiné par le code, en Canvas 2D, sans aucun fichier image. Le terrain est peint en facettes une fois par blocs de 12 × 12 hexagones, puis recopié tant que rien ne change (`render/terrain.ts`). Arbres, rochers, bâtiments et personnages sont dessinés en polygones, entourés d'un contour au crayon et mis en cache sous forme de petites images (`render/kit.ts`). À chaque image, `render/renderer.ts` recopie les blocs de terrain, trie les objets par profondeur, les pose, puis ajoute les nuages et un calque de teinte.
+Tout est dessiné par le code, en Canvas 2D, sans aucun fichier image, dans un style en facettes (low-poly) éclairé par un soleil unique venant du nord-ouest.
 
-Les captures de référence de cet état sont dans `docs/rendu/` (graine 20260, village simulé pendant 30 mois) : la côte au départ, le village au zoom 1 et au zoom maximal 2,4.
+- **Le sol et la mer** (`render/terrain.ts`) forment un maillage continu : chaque case est un anneau de sommets (coins et milieux d'arêtes) relié à un centre, et deux cases voisines partagent exactement la position, la hauteur et la couleur de leurs sommets communs. Il n'y a donc aucun joint entre les cases, et les couleurs se fondent d'un terrain à l'autre. La mer passe du turquoise des hauts-fonds au bleu du large selon la distance à la côte. Ce tapis est peint par blocs de 8 × 8 cases, recopiés à chaque image et repeints seulement quand un chemin, un bâtiment ou un rempart change dans le bloc.
+- **La netteté** suit le zoom : blocs et petites images sont peints à la densité de pixels réellement affichée (zoom × densité de l'écran), par paliers. Au changement de palier, l'ancienne version reste à l'écran le temps de repeindre, dans la limite de quelques millisecondes par image, et les blocs gardés en mémoire sont plafonnés.
+- **Les bâtiments** (`render/buildings.ts`) passent en trois couches : le sol (terre battue, champs) d'abord, puis l'ombre portée, calculée en rabattant chaque point du volume au sol à l'opposé du soleil (`A.SHADOW` dans `projection.ts`), enfin le volume lui-même.
+- **Arbres, rochers, ajoncs** (`render/decor.ts`) sont des blocs à facettes (`gem` dans `render/kit.ts`). Les trois sites des anciens (grand menhir, dolmen, chêne des anciens) gardent une taille hors d'échelle pour se repérer de loin ; on ne peut rien y bâtir.
+- **La grille** n'est plus visible par défaut. Le bouton « Grille » de la barre des vues, ou la touche G, l'affiche ou la masque ; le choix est gardé dans le navigateur.
+- **Les couleurs** sont réunies dans `data/palette.ts`. L'ancien trait de crayon et ses hachures restent dans le code, désactivés par `OUTLINE = false`.
 
-### Défauts relevés (octobre 2026)
+### Défauts relevés en octobre 2026, et ce qui a été fait
+
+Les captures « avant » et « après » sont dans `docs/rendu/`. Les huit défauts ci-dessous ont été traités dans la branche `rendu-facettes` : sol continu et grille à la demande (1), style en facettes unifié (2), personnages, arbres et rochers ramenés à l'échelle des maisons (3), palette lumineuse (4), ombres portées et sols de bâtiments plus discrets (5), variantes plus nombreuses, forêts aérées et champs d'un seul tenant (6), chemins en courbes de terre battue (7), netteté à tous les zooms (8).
 
 1. **La grille domine l'image.** Chaque case est un hexagone arrondi, rentré de 4,5 % (`INS`) sur une sous-couche sombre, si bien qu'un joint apparaît même entre deux cases de prairie. Le sol ressemble à un dallage plutôt qu'à un paysage. Les facettes partent toutes du centre de la case : chaque hexagone forme une petite pyramide, ce qui se voit surtout sur les plages et en mer.
 2. **Deux styles cohabitent.** Le terrain est en facettes sans contour, alors que les arbres, les rochers, les bâtiments et les personnages ont un trait sombre et un dessin d'illustration. L'œil lit deux jeux posés l'un sur l'autre.
